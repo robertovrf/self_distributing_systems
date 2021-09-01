@@ -1,4 +1,4 @@
-# Projeto Final de Graudação
+# Projeto Final de Graduação
 
 ## Para compilar o projeto:
 
