@@ -1,0 +1,121 @@
+uses App
+uses Service
+uses data.String
+
+const char HELP[] 			 = "help"
+const char DISTRIBUTE[]		 = "distribute"
+const char LOCAL[] 			 = "local"
+const char EXIT[] 			 = "exit"
+
+component provides App requires io.Output out, composition.RecursiveLoader rl, 
+	data.StringUtil strUtil, data.IntUtil iu, io.Input in, composition.Adapter adapter {
+	
+	App app = null
+	LoadedComponents server = null
+	bool local = true
+	LoadedComponents proxy = null
+
+	void help() {
+		out.println("Command list:")
+		out.println(" $(HELP) - to list all commands")
+		out.println(" $(DISTRIBUTE) - to distribute list")
+		out.println(" $(LOCAL) - bring list locally")
+		out.println(" $(EXIT) - to finish execution")
+	}
+
+	void commandInterpret(char cmd[]) {
+		int pointerServer = 0
+		int pointerList = 0
+
+		String cmdList[] = strUtil.explode(cmd, " ")
+		if (cmdList.arrayLength == 1) {
+			if (cmd == HELP) {
+				help()
+			} else if (cmd == DISTRIBUTE) {
+				if (!local) {
+					out.println("Already distributed!")
+					return
+				}
+				out.println("Distirbuting...")
+
+				// loading proxy
+				if (proxy == null)
+					proxy = rl.load("data/adt/ListCP.o")
+
+				// getting server and list pointers
+				pointerServer = 0
+				for (int i = 0; i < server.loadedComponents.arrayLength; i++) {
+					if (strUtil.find(server.loadedComponents[i].path, "Server.o") 
+						!= StringUtil.NOT_FOUND) {
+						pointerServer = i
+					}
+				}
+				if (pointerServer == 0) {
+					out.println("ERROR!")
+					return
+				}
+
+				// adapting
+				adapter.adaptRequiredInterface(server.loadedComponents[pointerServer].class,
+					"data.adt.List",
+					proxy.mainComponent)
+				local = false
+			} else if (cmd == LOCAL) {
+				if (local) {
+					out.println("Already local")
+					return
+				}
+				// getting both server and list pointers
+				pointerList = 0
+				pointerServer = 0
+				for (int i = 0; i < server.loadedComponents.arrayLength; i++) {
+					if (strUtil.find(server.loadedComponents[i].path, "List.o") 
+						!= StringUtil.NOT_FOUND) {
+						pointerList = i
+					}
+				}
+				for (int i = 0; i < server.loadedComponents.arrayLength; i++) {
+					if (strUtil.find(server.loadedComponents[i].path, "Server.o") 
+						!= StringUtil.NOT_FOUND) {
+						pointerServer = i
+					}
+				}
+				if (pointerServer == 0) {
+					out.println("ERROR!")
+					return
+				}
+				// loading original list
+				//proxy = rl.load(server.loadedComponents[pointerList].path)
+
+				// adapting
+				adapter.adaptRequiredInterface(server.loadedComponents[pointerServer].class,
+					"data.adt.List",
+					server.loadedComponents[pointerList].class)
+				local = true
+		    } else { out.println("Invalid command.") }
+		}
+	}
+
+	void startApp(IDC main, AppParam params[]) {
+		app = new App() from main
+		if (main.hasProvides("Service")) {
+			main.callInterface(app, "Service", typeof(Service), Service.[start()], null)
+		}
+		app.main(params)
+	}
+
+	int App:main(AppParam params[]) {
+		server = rl.load("../server/main.o")
+		asynch::startApp(server.mainComponent, null)
+		
+		/* command prompt */
+		char cmd[] = "start"
+		while (cmd != "exit") {
+			if (cmd != "start") { commandInterpret(cmd)	}
+			//out.println("$(lC.graph)")
+			out.print("distributor> ")
+			cmd = in.readln()
+		}
+		return 0
+	}
+}

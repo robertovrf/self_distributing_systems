@@ -1,0 +1,3 @@
+ interface Proxy {
+	void start(int port) 
+ }

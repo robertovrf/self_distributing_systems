@@ -1,0 +1,48 @@
+uses net.TCPSocket
+
+data CacheMessage {
+	int maxAge
+	char ifNoneMatch[]
+	char ifModifiedSince[]
+}
+
+data HTTPMessage {
+	char command[]
+	char resource[]
+	char version[]
+	char connection[]
+	char accept[]
+	char userAgent[]
+	char acceptEncoding[]
+	char acceptLanguage[]
+	char queryString[]
+	char postData[]
+	char mimeType[]
+	char contentType[]
+	char payload[]
+	char server[]
+	char contentEnconding[]
+	char accessControlAllowOrigin[]
+	char reasonPhrase[] // textual description about the numeric status
+	char rawHeader[]
+	int status
+	int contentLength //in bytes
+	int numRequest
+	int sleepTime
+	bool resourceExists
+	CacheMessage cacheMessage
+	TCPSocket socket
+}
+
+interface HTTPUtil {
+	// running web server directly
+	// const char htdocs[] = "htdocs"
+	// running web server from metacom folder
+	const char htdocs[] = "../repository/htdocs"
+	const int BUFF_SIZE = 1000
+	const char SERVER_NAME[] = "Dana Web Platform"
+	HTTPMessage readHeader(store TCPSocket s)
+	HTTPMessage getMessage(HTTPMessage header)
+	HTTPMessage readHTTPRequest(store TCPSocket s)
+	HTTPMessage parseHTTPRequest(char buf[])
+}

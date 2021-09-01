@@ -1,0 +1,143 @@
+data Param {
+	char value[]
+}
+
+data Request {
+	char functionName[]
+	int numParams
+	Param params[]
+}
+
+data Response {
+	// 1 OK - 2 FAILED
+	byte status 
+	// if it's null or "" this has to be translated to null
+	char value[]
+}
+
+data Int {
+	int i
+}
+
+component provides proxy.Proxy requires io.Output out, data.IntUtil iu, net.TCPSocket,
+	net.TCPServerSocket, data.adt.List list, data.json.JSONEncoder parser, data.StringUtil strUtil  {
+
+	bool serviceStatus
+	TCPServerSocket host
+
+	Response interpreter(Request request) {
+		Response response = null
+		if (request.functionName == "add") {
+			Int item = parser.jsonToData(request.params[0].value, typeof(Int), null)
+			list.add(item)
+			response = new Response()
+			response.status = 1
+			response.value = ""
+
+			/*out.println("ADDED!!!!!")*/
+			Data nums[] = list.getContents()
+			char result[] = new char[]("[")
+			for (int i = 0; i < nums.arrayLength; i++) {
+			Int num = nums[i]
+			result = new char[](result, " ", iu.intToString(num.i))
+			}
+			result = new char[](result, " ]")
+			out.println("$(result)")
+			
+			return response
+		} else if (request.functionName == "getLength") {
+			response = new Response()
+			response.status = 1
+			response.value = new char[](iu.intToString(list.getLength()))
+
+			return response
+		} else if (request.functionName == "getContents") {
+			Data nums[] = list.getContents()
+			Int result[] = new Int[list.getLength()]
+			for (int i = 0; i < nums.arrayLength; i++) {
+				result[i] = nums[i]
+			}
+			response = new Response()
+			response.status = 3
+			response.value = parser.jsonFromArray(result, null)
+
+			return response
+		}
+		response.status = 2
+		response.value = ""
+		return response
+	}
+
+	Request parseRequest(char content[]) {
+		String helper[] = strUtil.explode(content, "!")
+		Request request = parser.jsonToData(helper[0].string, typeof(Request), null)
+		Request newRequest = new Request()
+		newRequest.numParams = request.numParams
+		newRequest.functionName = request.functionName
+		for (int i = 0; i < newRequest.numParams; i++) {
+			newRequest.params = new Param[newRequest.numParams]()
+			newRequest.params[i] = new Param()
+			newRequest.params[i].value = helper[i+1].string
+		}
+		return newRequest
+	}
+
+	Request readRequest(TCPSocket s) {
+		Request request = null
+		char buf[] = null
+		int len = 0
+		char command[] = null
+		while ((buf = s.recv(1)).arrayLength > 0) {
+			command = new char[](command, buf)
+			len++
+			//stop condition
+			if (len >= 4) {
+				if ((command[len-4] == "\r") && (command[len-3] == "\r") && 
+					(command[len-2] == "\r") && (command[len-1] == "\r")) {
+					request = parseRequest(strUtil.subString(command, 
+							0, command.arrayLength-4))
+					break
+				}
+			}
+		}
+		if (request == null) { s.disconnect() }
+		return request
+	}
+
+	void process(TCPSocket s) {
+		Response response = new Response()
+		Request request = readRequest(s)
+		char content[]
+		if (request == null) {
+			response.status = 2
+			response.value = null
+		} else
+			response = interpreter(request) 
+		if (response.status == 3) {
+			response.status = 2
+			char value[] = response.value
+			response.value = ""
+			content = new char[](parser.jsonFromData(response,null), "!", value, "\r\r\r\r")
+		} else {
+			content = new char[](parser.jsonFromData(response,null), "\r\r\r\r")
+		}
+		s.send(content)
+		s.disconnect()
+	}
+
+	void Proxy:start(int port) {
+		out.println("STARTED")
+		serviceStatus = true
+		host = new TCPServerSocket()
+		if (!host.bind(TCPServerSocket.ANY_ADDRESS, port)) {
+			out.println("Error: failed to bind master socket")
+			return
+		}
+		while (serviceStatus) {
+			TCPSocket client = new TCPSocket()
+			if (client.accept(host)) {
+				asynch::process(client)
+			}
+		}
+	}
+}

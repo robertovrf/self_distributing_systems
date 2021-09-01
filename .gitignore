@@ -1,0 +1,7 @@
+*.o
+*.json
+*.gz
+*.zl
+*.out
+*.iml
+.DS_Store

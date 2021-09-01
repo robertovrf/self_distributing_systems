@@ -1,0 +1,236 @@
+// HTTPUTil
+//
+// Basically it just parses a socket stream to HTTPMessage
+//
+// Author: Roberto Rodrigues Filho
+// February @ 2017
+const char debugMSG[] = "[@HTTPUtil]"
+
+component provides http.HTTPUtil requires io.Output out, data.IntUtil iu, io.FileSystem fileSystem, 
+	data.StringUtil stringUtil {
+	
+	// TODO: I think I can do better than reading 1 byte at a time...
+	HTTPMessage HTTPUtil:readHeader(store TCPSocket s) {
+		HTTPMessage httpHeader = null
+		char buf[] = null
+		int len = 0
+		char command[] = null
+		while ((buf = s.recv(1)).arrayLength > 0) {
+			command = new char[](command, buf)
+			len++
+			//stop condition
+			if (len >= 4) {
+				if ((command[len-4] == "\r") && (command[len-3] == "\n") && 
+					(command[len-2] == "\r") && (command[len-1] == "\n")) {
+					httpHeader = parseHTTPRequest(command)
+					if (httpHeader != null) { httpHeader.rawHeader = command }
+					break
+				}
+			}
+		}
+		if (httpHeader == null) { s.disconnect() }
+		if (httpHeader != null) { httpHeader.socket = s }
+		return httpHeader
+	}
+
+	HTTPMessage HTTPUtil:getMessage(HTTPMessage header) {
+		HTTPMessage message = new HTTPMessage()
+		message.command = header.command
+		message.resource = header.resource
+		message.version = header.version
+		message.connection = header.connection
+		message.accept = header.accept
+		message.userAgent = header.userAgent
+		message.acceptEncoding = header.acceptEncoding
+		message.acceptLanguage = header.acceptLanguage
+		message.queryString = header.queryString
+		message.mimeType = header.mimeType
+		message.contentType = header.contentType
+		message.payload = header.payload
+		message.server = header.server
+		message.contentEnconding = header.contentEnconding
+		message.accessControlAllowOrigin = header.accessControlAllowOrigin
+		message.reasonPhrase = header.reasonPhrase
+		message.rawHeader = header.rawHeader
+		message.status = header.status
+		message.contentLength = header.contentLength
+		message.numRequest = header.numRequest
+		message.sleepTime = header.sleepTime
+		message.resourceExists = header.resourceExists
+		message.cacheMessage = null
+		if (header.cacheMessage != null) {
+			message.cacheMessage = new CacheMessage()
+			message.cacheMessage.maxAge = header.cacheMessage.maxAge
+			message.cacheMessage.ifNoneMatch = header.cacheMessage.ifNoneMatch
+			message.cacheMessage.ifModifiedSince = header.cacheMessage.ifModifiedSince
+		}
+		message.socket = header.socket
+		if (header.contentLength > 0) {
+			message.postData = new char[](header.socket.recv(header.contentLength))
+		}
+		return message
+	}
+
+	HTTPMessage HTTPUtil:readHTTPRequest(store TCPSocket s) {
+		HTTPMessage httpHeader = readHeader(s)
+		return getMessage(httpHeader)
+	}
+
+	// TODO: if there is a folder inside of that folder...
+	// need to htdocs/something/other.html
+	char[] normalisePath(char resource[]) {
+		// in case there is queryString (the GET param)
+		String helper[] = stringUtil.explode(resource, "?")
+		resource = new char[](HTTPUtil.htdocs, helper[0].string)
+		if (fileSystem.getInfo(resource).type == FileInfo.TYPE_DIR) {
+			char test[]
+			if (resource[resource.arrayLength-1] == "/") { test = new char[](resource, "index.html") }
+			else { test = new char[](resource, "/index.html") }
+			if (fileSystem.exists(test)) { return test }
+		}
+		return resource
+	}
+
+	char[] getFileFormat(char resource[]) {
+		char fileFormat[] = ""
+		int i = resource.arrayLength-1
+		while (i > 0 && resource[i] != ".") { i-- }
+		if (i > 0) { fileFormat = stringUtil.subString(resource, (i+1), (resource.arrayLength-i-1)) }
+		return fileFormat
+	}
+
+	char[] getMIMEType(char resource[]) {
+		char fileFormat[] = getFileFormat(resource)
+		if (fileFormat == "html" || fileFormat == "htm") { return "text/html" }
+		if (fileFormat == "jpg") { return "image/jpeg" }
+		if (fileFormat == "png") { return "image/png" }
+		if (fileFormat == "gif") { return "image/gif" }
+		if (fileFormat == "min.js" || fileFormat == "js") { return "application/x-javascript" }
+		if (fileFormat == "css" || fileFormat == "min.css") { return "text/css"	}
+		if (fileFormat == "pdf") { return "application/pdf"	}
+		if (fileFormat == "mpg") { return "video/mpeg" }
+		if (fileFormat == "php") { return fileFormat }
+		if (fileFormat == "dn") {return fileFormat }
+		return "text/plain"
+	}
+
+	// entire_line true means it will copy the entire line, including the spaces, until it finds \n
+	// entire_line false means it will copy the line up to a space or \n (whatever comes first)
+	char[] getParam(char buf[], int i, bool entire_line) {
+		char result[] = null
+		int si = 0
+		while (i > 0) {
+			//find the next space character
+			while (si < buf.arrayLength && buf[si] != " " && buf[si] != "\n") { si++ }
+			if (si == buf.arrayLength) { return null }
+			si++
+			i--
+		}
+		int ei = si
+		//find the *next* space character and return a bounded pointer to this section
+		if (entire_line) {
+			while (ei < buf.arrayLength && buf[ei] != "\n") {
+				ei++
+				i++
+			}
+		} else {
+			while (ei < buf.arrayLength && buf[ei] != " " && buf[ei] != "\n") {
+				ei++
+				i++
+			}
+		}
+		return stringUtil.subString(buf, si, i)
+	}
+
+	char[] getQueryString(char resource[]) {
+		String helper[] = stringUtil.explode(resource, "?")
+		if (helper.arrayLength == 2) { return new char[](helper[1].string) }
+		return ""
+	}
+
+	char[] getResource(char resource[]) {
+		char str[] = clone resource
+		int i = 0
+		while ((i < str.arrayLength) && (str[i] != "?")) { i++ }
+		return new char[](stringUtil.subString(str, 0, i))
+	}
+	
+	// examples of request first line:
+	// request: GET /path/to/file/index.html HTTP/1.0
+	// response: HTTP/1.0 200 OK
+	HTTPMessage HTTPUtil:parseHTTPRequest(char buf[]) {
+		HTTPMessage httpMessage = new HTTPMessage()
+		String lines[] = stringUtil.explode(buf, "\r\n")
+		bool resp = false
+		for (int lineCounter = 0; lineCounter < lines.arrayLength; lineCounter++) {
+			String helper[] = stringUtil.explode(lines[lineCounter].string, " ")
+			if (lineCounter == 0) {
+				// HTTP header
+				if ((helper[0].string == "HTTP/1.0") || (helper[0].string == "HTTP/1.1")) {
+					// response
+					httpMessage.version = helper[0].string
+					if (stringUtil.isNumeric(helper[1].string)) {
+						httpMessage.status = iu.intFromString(helper[1].string)	
+					} else { throw new Exception ("Invalid HTTP format.") }
+					helper = removeFromList(helper, 0)
+					helper = removeFromList(helper, 0)
+					httpMessage.reasonPhrase = stringUtil.implode(helper, " ")
+					resp = true
+				} else {
+					// request
+					httpMessage.command = helper[0].string
+					httpMessage.resource = helper[1].string
+					httpMessage.version = helper[2].string
+					resp = false
+				}
+			} else {
+				char aux[]
+				// if: in case the client make a request and do not add a space after the colon
+				if (helper.arrayLength == 1) {
+					helper = stringUtil.explode(lines[lineCounter].string, ":")
+					aux = new char[](stringUtil.lowercase(helper[0].string), ":")
+				} else { aux = stringUtil.lowercase(helper[0].string) }
+				helper = removeFromList(helper, 0)
+				if (aux == "connection:") { httpMessage.connection = stringUtil.implode(helper, " ") }
+				if (aux == "accept:") { httpMessage.accept = stringUtil.implode(helper, " ") }
+				if (aux == "user-agent:") { httpMessage.userAgent = stringUtil.implode(helper, " ") }
+				if (aux == "accept-encoding:") { httpMessage.acceptEncoding = stringUtil.implode(helper, " ") }
+				if (aux == "accept-language:") { httpMessage.acceptLanguage = stringUtil.implode(helper, " ") }
+				if (aux == "content-type:") { httpMessage.contentType = stringUtil.implode(helper, " ") }
+				if (aux == "content-length:") {
+					char cLength[] = helper[0].string
+					if (stringUtil.isNumeric(cLength)) { httpMessage.contentLength = iu.intFromString(cLength) }
+					else { throw new Exception("HTTP invalid package format.") }							
+				}
+				if (aux == "server:") { httpMessage.server = stringUtil.implode(helper, " ") }
+				if (aux == "content-encoding:") { httpMessage.contentEnconding = stringUtil.implode(helper, " ") }
+				if (aux == "access-control-allow-origin:") {
+					httpMessage.accessControlAllowOrigin = stringUtil.implode(helper, " ")
+				}
+			}
+		}
+		if (!resp) {
+			httpMessage.queryString = getQueryString(httpMessage.resource)
+			httpMessage.resource = normalisePath(httpMessage.resource)
+			httpMessage.resourceExists = resourceExists(httpMessage.resource)
+			httpMessage.mimeType = getMIMEType(httpMessage.resource)	
+		}
+		return httpMessage
+	}
+
+	String[] removeFromList(String list[], int index) {
+		String result[] = null
+		for (int pointer = 0; pointer < list.arrayLength; pointer++) {
+			if (pointer != index) { result = new String[](result, new String(list[pointer].string)) }
+		}
+		return result
+	}
+
+	bool resourceExists(char resource[]) {
+		if (fileSystem.exists(resource)) {
+			if (fileSystem.getInfo(resource).type == FileInfo.TYPE_DIR) { return false } 
+			else { return true }
+		}
+		return false
+	}
+}

@@ -1,0 +1,39 @@
+data Int {
+	int i
+}
+
+component provides server.Server requires io.Output out, data.adt.List list, 
+	http.HTTPUtil httpUtil, data.IntUtil iu {
+
+	void Server:process(HTTPMessage msg) {
+		if (msg.command == "GET") {
+			if (list.getLength() == 0) {
+				sendResponse(msg, "EMPTY")	
+			} else {
+				Data nums[] = list.getContents()
+				char result[] = new char[]("[")
+				for (int i = 0; i < nums.arrayLength; i++) {
+					Int num = nums[i]
+					result = new char[](result, " ", iu.intToString(num.i))
+				}
+				result = new char[](result, " ]")
+				sendResponse(msg, result)
+			}
+		} else if (msg.command == "POST") {
+			Int num = new Int(iu.intFromString(msg.postData))
+			list.add(num)
+			sendResponse(msg, "OK")
+		}
+	}
+
+	void sendResponse(HTTPMessage httpMessage, char response[]) {
+		httpMessage.socket.send("HTTP/1.1 200 OK\r\n")
+		httpMessage.socket.send("Server: $(HTTPUtil.SERVER_NAME)\r\n")
+		httpMessage.socket.send("Content-Encoding: binary\r\n")
+		httpMessage.socket.send("Content-Length: $(iu.intToString(response.arrayLength))\r\n")
+		httpMessage.socket.send("Connection: close\r\n")
+		httpMessage.socket.send("Content-Type: $(httpMessage.mimeType)\r\n")
+		httpMessage.socket.send("\r\n")
+		httpMessage.socket.send(response)
+	}
+}

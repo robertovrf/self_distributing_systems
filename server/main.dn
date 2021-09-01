@@ -1,0 +1,35 @@
+
+component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocket, 
+	http.HTTPUtil httpUtil, server.Server server {
+
+	// processing incoming requests and handing them over to Server
+	void handleRequest(TCPSocket client) {
+		HTTPMessage msg = httpUtil.readHTTPRequest(client)
+		server.process(msg)
+	}
+
+	int App:main(AppParam params[]) {
+		// instantiating variables
+		TCPServerSocket host = new TCPServerSocket()
+		int server_port = 8080
+		server = new Server()
+
+	
+		// binding server socket
+		if (!host.bind(TCPServerSocket.ANY_ADDRESS, server_port)) {
+			out.println("Error: failed to bind master socket")
+			return 1
+		}
+
+		//out.println("Server is up and running...")
+
+		// handling incoming requests
+		while (true) {
+			TCPSocket client = new TCPSocket()
+			if (client.accept(host))
+				asynch::handleRequest(client)
+		}
+
+		return 0
+	}
+}

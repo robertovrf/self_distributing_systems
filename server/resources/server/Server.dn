@@ -1,0 +1,5 @@
+uses http.HTTPUtil
+
+interface Server {
+	void process(HTTPMessage msg)
+}
