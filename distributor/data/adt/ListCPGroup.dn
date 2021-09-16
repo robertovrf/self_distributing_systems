@@ -1,0 +1,210 @@
+data Param {
+	char value[]
+}
+
+data Request {
+	char functionName[]
+	int numParams
+	Param params[]
+}
+
+data Response {
+	// 1 OK - 2 FAILED
+	byte status
+	// if it's null or "" this has to be translated to null
+	char value[]
+}
+
+data IPAddr {
+	char ip[]
+	int port
+}
+
+data Int {
+	int i
+}
+
+component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder parser,
+	net.TCPSocket, net.TCPServerSocket, data.StringUtil strUtil, io.Output out, data.IntUtil iu {
+
+	IPAddr ips[] = null
+	int pointer = 0
+	Mutex ipsLock = new Mutex()
+
+	void setupIPs() {
+		if (ips == null) {
+			ips = new IPAddr[2]
+			ips[0] = new IPAddr()
+			ips[0].ip = new char[]("localhost")
+			ips[0].port = 2010
+			ips[1] = new IPAddr()
+			ips[1].ip = new char[]("localhost")
+			ips[1].port = 2011
+		}
+	}
+
+	Response parseResponse(char content[]) {
+		String helper[] = strUtil.explode(content, "!")
+		Response response
+		if (helper.arrayLength > 1) {
+			response = parser.jsonToData(helper[0].string, typeof(Response), null)
+			Response response2 = new Response()
+			response2.value = helper[1].string
+			response2.status = response.status
+			response = response2
+		} else {
+			response = parser.jsonToData(content, typeof(Response), null)
+		}
+		return response
+	}
+
+	Response readResponse(TCPSocket s) {
+		Response response = null
+		char buf[] = null
+		int len = 0
+		char command[] = null
+		while ((buf = s.recv(1)).arrayLength > 0) {
+			command = new char[](command, buf)
+			len++
+			//stop condition
+			if (len >= 4) {
+				if ((command[len-4] == "\r") && (command[len-3] == "\r") &&
+					(command[len-2] == "\r") && (command[len-1] == "\r")) {
+					response = parseResponse(strUtil.subString(command,
+						0, command.arrayLength-4))
+					break
+				}
+			}
+		}
+		if (response == null) { s.disconnect() }
+		return response
+	}
+
+	bool establishConnection(IPAddr addr, TCPSocket remoteObj) {
+		if (!remoteObj.connect(addr.ip, addr.port)) {
+			out.println("Connection error!")
+			return false
+		}
+		return true
+	}
+
+	Response connectAndSend(IPAddr addr, char content[]) {
+		TCPSocket remoteObj = new TCPSocket()
+		Response resp = null
+		if (establishConnection(addr, remoteObj)) {
+			remoteObj.send(content)
+			resp = readResponse(remoteObj)
+			remoteObj.disconnect()
+		}
+		return resp
+	}
+
+  void makeGroupRequest(char content[]) {
+		setupIPs()
+    IPAddr addr = null
+    for (int i = 0; i < ips.arrayLength; i++) {
+      addr = ips[i]
+      asynch::connectAndSend(addr, content)
+    }
+	}
+
+	Response makeRequest(char content[]) {
+		setupIPs()
+		Response resp = null
+		IPAddr addr = null
+		mutex(ipsLock) {
+			if (ips.arrayLength > 1) {
+				if (pointer == ips.arrayLength) { pointer = 0 }
+				addr = ips[pointer]
+				pointer++
+			} else { out.println("ERROR!") }
+		}
+		return connectAndSend(addr, content)
+	}
+
+	void List:add(Data item) {
+		Request request = new Request()
+		request.functionName = "add"
+		request.numParams = 1
+		char requestStr[] = parser.jsonFromData(request, null)
+		char param[] = parser.jsonFromData(item, null)
+		char content2[] = new char[](requestStr, "!", param, "\r\r\r\r")
+		makeGroupRequest(content2)
+	}
+
+	void List:remove(Data item) {
+		// TODO
+	}
+
+	void List:update(Data item, Data newVersion) {
+		// TODO
+	}
+
+	Data List:getFirst() {
+		// TODO
+		return null
+	}
+
+	Data List:getNext() {
+		// TODO
+		return null
+	}
+
+	bool List:isEnd() {
+		// TODO
+		return false
+	}
+
+	Data List:getIndex(int ndx) {
+		// TODO
+		return null
+	}
+
+	void List:setIndex(int ndx, Data d) {
+		//TODO
+	}
+
+	int List:getLength() {
+		Request request = new Request()
+		request.functionName = "getLength"
+		request.numParams = 0
+		char requestStr[] = parser.jsonFromData(request, null)
+		char content2[] = new char[](requestStr, "!", " ", "\r\r\r\r")
+		Response response = makeRequest(content2)
+		return iu.intFromString(response.value)
+	}
+
+	Data[] List:getContents(opt Type t) {
+		Request request = new Request()
+		request.functionName = "getContents"
+		request.numParams = 0
+		char requestStr[] = parser.jsonFromData(request, null)
+		char content2[] = new char[](requestStr, "!", " ", "\r\r\r\r")
+		Response response = makeRequest(content2)
+		Int nums[] = parser.jsonToArray(response.value, typeof(Int[]), null)
+		return nums
+	}
+
+	void buildFromArray(Data items[]) {
+		// TODO
+	}
+
+	bool List:clone(Object o) {
+		// TODO
+		return false
+	}
+
+	void clearList() {
+		// TODO
+	}
+
+	void Destructor:destroy() {
+	}
+
+	void AdaptEvents:inactive() {
+	}
+
+	void AdaptEvents:active() {
+	}
+
+	}
