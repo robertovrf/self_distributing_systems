@@ -1,0 +1,47 @@
+component provides App requires io.Output out, net.http.HTTPRequest http,
+	data.IntUtil iu, data.StringUtil su
+{
+	char baseUrl[] = "http://localhost:8080/"
+	char addOp[] = "add"
+	char getOp[] = "get"
+
+  void addRequest(int value) {
+    char strValue[] = new char[](iu.makeString(value))
+		char endpoint[] = new char[](baseUrl, addOp)
+    HTTPResponse resp = http.post(endpoint, null, strValue)
+		out.println("$(resp.content)")
+  }
+
+  void getRequest() {
+		char endpoint[] = new char[](baseUrl, getOp)
+    HTTPResponse resp = http.get(endpoint, null)
+		out.println("$(resp.content)")
+  }
+
+	int App:main(AppParam params[]) {
+
+		bool isAsynch = false
+		if(params != null && su.iequal(params[0].string, "true")) {
+			isAsynch = true
+			out.println("Making asynch requests...")
+		}
+
+    for (int i = 0; i < 10; i++) {
+      if (i == 9) {
+        if(isAsynch) {
+					asynch::getRequest()
+				} else {
+					getRequest()
+				}
+      } else {
+				if(isAsynch) {
+					asynch::addRequest(i)
+				} else {
+					addRequest(i)
+				}
+      }
+    }
+
+		return 0
+	}
+}
