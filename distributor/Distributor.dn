@@ -49,8 +49,6 @@ component provides App requires io.Output out, composition.RecursiveLoader rl,
 			out.println("ERROR!")
 			return
 		}
-		// loading original list
-		//proxy = rl.load(server.loadedComponents[pointerList].path)
 		// adapting
 		adapter.adaptRequiredInterface(
 			server.loadedComponents[pointerServer].class,
@@ -118,14 +116,12 @@ component provides App requires io.Output out, composition.RecursiveLoader rl,
 
 	int App:main(AppParam params[]) {
 		server = rl.load("../server/main.o")
-		//server = rl.load("../distributor/RemoteList.o")
 		asynch::startApp(server.mainComponent, null)
 
 		/* command prompt */
 		char cmd[] = "start"
 		while (cmd != "exit") {
 			if (cmd != "start") { commandInterpret(cmd)	}
-			//out.println("$(lC.graph)")
 			out.print("distributor> ")
 			cmd = in.readln()
 		}

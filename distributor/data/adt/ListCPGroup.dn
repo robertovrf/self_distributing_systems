@@ -24,24 +24,53 @@ data Int {
 	int i
 }
 
+/* Available list operations */
+const char ADD[]          = "add"
+const char GET_LENGTH[]   = "getLength"
+const char GET_CONTENTS[] = "getContents"
+const char CLEAR_LIST[]   = "clearList"
+
+/* IPs */
+const char LOCALHOST[] = "localhost"
+
 component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder parser,
 	net.TCPSocket, net.TCPServerSocket, data.StringUtil strUtil, io.Output out, data.IntUtil iu {
 
-	IPAddr ips[] = null
-	int pointer = 0
-	Mutex ipsLock = new Mutex()
+		IPAddr remoteDistsIps[] = null
+		IPAddr remoteListsIps[] = null
+		Mutex remoteListsIpsLock = new Mutex()
+		int pointer = 0
 
-	void setupIPs() {
-		if (ips == null) {
-			ips = new IPAddr[2]
-			ips[0] = new IPAddr()
-			ips[0].ip = new char[]("localhost")
-			ips[0].port = 2010
-			ips[1] = new IPAddr()
-			ips[1].ip = new char[]("localhost")
-			ips[1].port = 2011
+		void setupRemoteDistsIPs() {
+			if (remoteDistsIps == null) {
+				remoteDistsIps = new IPAddr[2]
+				remoteDistsIps[0] = new IPAddr()
+				remoteDistsIps[0].ip = new char[](LOCALHOST)
+				remoteDistsIps[0].port = 8081
+				remoteDistsIps[1] = new IPAddr()
+				remoteDistsIps[1].ip = new char[](LOCALHOST)
+				remoteDistsIps[1].port = 8082
+			}
 		}
-	}
+
+		void setupRemoteListsIPs() {
+			if (remoteListsIps == null) {
+				remoteListsIps = new IPAddr[2]
+				remoteListsIps[0] = new IPAddr()
+				remoteListsIps[0].ip = new char[](LOCALHOST)
+				remoteListsIps[0].port = 2010
+				remoteListsIps[1] = new IPAddr()
+				remoteListsIps[1].ip = new char[](LOCALHOST)
+				remoteListsIps[1].port = 2011
+			}
+		}
+
+		void sendMsgToRemoteDists(char msg[]) {
+			setupRemoteDistsIPs()
+			for (int i = 0; i < remoteDistsIps.arrayLength; i++) {
+				connectAndSend(remoteDistsIps[i], msg, false)
+			}
+		}
 
 	Response parseResponse(char content[]) {
 		String helper[] = strUtil.explode(content, "!")
@@ -88,43 +117,43 @@ component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder 
 		return true
 	}
 
-	Response connectAndSend(IPAddr addr, char content[]) {
+	Response connectAndSend(IPAddr addr, char content[], bool readResponse) {
 		TCPSocket remoteObj = new TCPSocket()
 		Response resp = null
 		if (establishConnection(addr, remoteObj)) {
 			remoteObj.send(content)
-			resp = readResponse(remoteObj)
+			if (readResponse) { resp = readResponse(remoteObj) }
 			remoteObj.disconnect()
 		}
 		return resp
 	}
 
   void makeGroupRequest(char content[]) {
-		setupIPs()
+		setupRemoteListsIPs()
     IPAddr addr = null
-    for (int i = 0; i < ips.arrayLength; i++) {
-      addr = ips[i]
-      asynch::connectAndSend(addr, content)
+    for (int i = 0; i < remoteListsIps.arrayLength; i++) {
+      addr = remoteListsIps[i]
+      asynch::connectAndSend(addr, content, true)
     }
 	}
 
 	Response makeRequest(char content[]) {
-		setupIPs()
+		setupRemoteListsIPs()
 		Response resp = null
 		IPAddr addr = null
-		mutex(ipsLock) {
-			if (ips.arrayLength > 1) {
-				if (pointer == ips.arrayLength) { pointer = 0 }
-				addr = ips[pointer]
+		mutex(remoteListsIpsLock) {
+			if (remoteListsIps.arrayLength > 1) {
+				if (pointer == remoteListsIps.arrayLength) { pointer = 0 }
+				addr = remoteListsIps[pointer]
 				pointer++
 			} else { out.println("ERROR!") }
 		}
-		return connectAndSend(addr, content)
+		return connectAndSend(addr, content, true)
 	}
 
 	void List:add(Data item) {
 		Request request = new Request()
-		request.functionName = "add"
+		request.functionName = ADD
 		request.numParams = 1
 		char requestStr[] = parser.jsonFromData(request, null)
 		char param[] = parser.jsonFromData(item, null)
@@ -166,7 +195,7 @@ component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder 
 
 	int List:getLength() {
 		Request request = new Request()
-		request.functionName = "getLength"
+		request.functionName = GET_LENGTH
 		request.numParams = 0
 		char requestStr[] = parser.jsonFromData(request, null)
 		char content2[] = new char[](requestStr, "!", " ", "\r\r\r\r")
@@ -176,7 +205,7 @@ component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder 
 
 	Data[] List:getContents(opt Type t) {
 		Request request = new Request()
-		request.functionName = "getContents"
+		request.functionName = GET_CONTENTS
 		request.numParams = 0
 		char requestStr[] = parser.jsonFromData(request, null)
 		char content2[] = new char[](requestStr, "!", " ", "\r\r\r\r")
@@ -202,9 +231,15 @@ component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder 
 	}
 
 	void AdaptEvents:inactive() {
+		content = getContents()
+		char msg[] = new char[]("clearList!")
+		sendMsgToRemoteDists(msg)
 	}
 
+	// this is extremely hardcoded! ):
 	void AdaptEvents:active() {
+		char state[] = parser.jsonFromArray(content, null)
+		char msg[] = new char[]("../distributor/RemoteList.o!", state)
+		sendMsgToRemoteDists(msg)
 	}
-
-	}
+}
