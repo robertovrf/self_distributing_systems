@@ -1,5 +1,0 @@
-{
-defaultLinks:	[
-				{interface: "Proxy", component: "ListSP"}
-				]
-}

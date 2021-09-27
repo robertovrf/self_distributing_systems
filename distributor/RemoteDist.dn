@@ -1,0 +1,107 @@
+uses data.adt.List
+uses Service
+uses App
+uses data.String
+
+data Int {
+	int i
+}
+
+const char debugMSG[] = "[@RemoteDist]"
+
+component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocket, 
+	data.StringUtil strUtil, composition.RecursiveLoader rl, data.json.JSONEncoder encoder,
+	data.IntUtil iu {
+
+	LoadedComponents remote = null
+	int portDist = 0
+	int portApp = 0
+	App app
+
+	void startApp(IDC main, AppParam params[]) {
+		app = new App() from main
+		if (main.hasProvides("Service")) {
+			main.callInterface(app, "Service", typeof(Service), Service.[start()], null)
+		}
+		app.main(params)
+	} 
+
+	void startRemoteProcess(char remoteP[], char state[]) {
+		// load and start relocated component
+		remote = rl.load(remoteP)
+		AppParam params[] = new AppParam[1]
+		params[0] = new AppParam()
+		params[0].string = iu.intToString(portApp)
+		asynch::startApp(remote.mainComponent, params)
+		out.println("$(debugMSG) Remote Component $(remoteP) Started! ")
+
+		// locating the right object to set remote state
+		int pointerProxy = 0
+		for (int i = 0; i < remote.loadedComponents.arrayLength; i++) {
+			if (strUtil.find(remote.loadedComponents[i].path, "DistProxy.o") 
+				!= StringUtil.NOT_FOUND) {
+				pointerProxy = i
+			}
+		}
+
+		// parsing state to Data
+		Int content[] = encoder.jsonToArray(state, typeof(Int[]), null) 
+		
+		// adding content to list in the object
+		Object objects[] = remote.loadedComponents[pointerProxy].class.getObjects("data.adt.List")
+		List list = objects[0]
+		for (int i = 0; i < content.arrayLength; i++) {
+			list.add(content[i])
+		}
+		out.println("$(debugMSG) State inserted!")
+	}
+
+	void handleRequest(TCPSocket client) {
+		// reading data from socket -- this could be optimised
+		char buf[] = null
+		int len = 0
+		char command[] = null
+		while ((buf = client.recv(1)).arrayLength > 0) {
+			command = new char[](command, buf)
+			len++
+			//stop condition
+			if (len >= 4) {
+				if ((command[len-4] == "\r") && (command[len-3] == "\r") && 
+					(command[len-2] == "\r") && (command[len-1] == "\r")) {
+					break
+				}
+			}
+		}
+		// processing command
+		String helper[] = strUtil.explode(command, "!")
+		startRemoteProcess(helper[0].string, helper[1].string)
+	}
+
+	int App:main(AppParam params[]) {
+		portDist = 8081
+		portApp = 2010
+		if (params.arrayLength > 0) { 
+			portDist = iu.intFromString(params[0].string)
+			portApp = iu.intFromString(params[1].string)
+		}
+
+		// instantiating variables
+		TCPServerSocket host = new TCPServerSocket()
+	
+		// binding server socket
+		if (!host.bind(TCPServerSocket.ANY_ADDRESS, portDist)) {
+			out.println("Error: failed to bind master socket")
+			return 1
+		}
+
+		out.println("$(debugMSG) Remote Distributor started!")
+
+		while (true) {
+			TCPSocket client = new TCPSocket()
+			if (client.accept(host))
+				asynch::handleRequest(client)
+		}
+
+		return 0
+	}
+}

@@ -19,7 +19,7 @@ data Int {
 	int i
 }
 
-component provides proxy.Proxy requires io.Output out, data.IntUtil iu, net.TCPSocket,
+component provides proxy.DistProxy requires io.Output out, data.IntUtil iu, net.TCPSocket,
 	net.TCPServerSocket, data.adt.List list, data.json.JSONEncoder parser, data.StringUtil strUtil  {
 
 	bool serviceStatus
@@ -125,7 +125,7 @@ component provides proxy.Proxy requires io.Output out, data.IntUtil iu, net.TCPS
 		s.disconnect()
 	}
 
-	void Proxy:start(int port) {
+	void DistProxy:start(int port) {
 		out.println("STARTED")
 		serviceStatus = true
 		host = new TCPServerSocket()

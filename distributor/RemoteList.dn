@@ -1,4 +1,4 @@
-component provides App requires io.Output out, data.IntUtil iu, proxy.Proxy list {
+component provides App requires io.Output out, data.IntUtil iu, proxy.DistProxy list {
 	int App:main(AppParam params[]) {
 		int port = 2010
 		if (params.arrayLength > 0) { port = iu.intFromString(params[0].string)	}
