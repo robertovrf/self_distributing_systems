@@ -43,3 +43,19 @@ Em um terceiro terminal digite:
 $ dana RemoteList.o 2011
 
 A primeira composição do servidor que o Distribuidor monta é a versão local. Para distribuí-lo, digite distribute. Para tornar o servidor todo local novamente, digite local.
+
+## Para executar o distribuidor (local e remote):
+
+Abra três terminais na pasta _distributor_. No primeiro execute:
+
+$ dana -sp ../server Distributor.o
+
+Em um segundo terminal digite:
+
+$ dana -sp . RemoteDist.o
+
+Em um terceiro terminal digite:
+
+$ dana -sp . RemoteDist.o 8082 2011
+
+A primeira composição do servidor que o Distribuidor monta é a versão local. Para distribuí-lo, digite distribute. Para tornar o servidor todo local novamente, digite local.
