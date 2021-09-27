@@ -17,6 +17,7 @@ component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocke
 	int portDist = 0
 	int portApp = 0
 	App app
+	bool running = false
 
 	void startApp(IDC main, AppParam params[]) {
 		app = new App() from main
@@ -28,12 +29,15 @@ component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocke
 
 	void startRemoteProcess(char remoteP[], char state[]) {
 		// load and start relocated component
-		remote = rl.load(remoteP)
-		AppParam params[] = new AppParam[1]
-		params[0] = new AppParam()
-		params[0].string = iu.intToString(portApp)
-		asynch::startApp(remote.mainComponent, params)
-		out.println("$(debugMSG) Remote Component $(remoteP) Started! ")
+		if (!running) {
+			remote = rl.load(remoteP)
+			AppParam params[] = new AppParam[1]
+			params[0] = new AppParam()
+			params[0].string = iu.intToString(portApp)
+			asynch::startApp(remote.mainComponent, params)
+			out.println("$(debugMSG) Remote Component $(remoteP) Started! ")
+			running = true			
+		}
 
 		// locating the right object to set remote state
 		int pointerProxy = 0
@@ -56,6 +60,24 @@ component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocke
 		out.println("$(debugMSG) State inserted!")
 	}
 
+	// TODO: need to pause component, wait for object to finish processing 
+	// any threads it is currently running, etc.
+	void clearState() {
+		int pointerProxy = 0
+		for (int i = 0; i < remote.loadedComponents.arrayLength; i++) {
+			if (strUtil.find(remote.loadedComponents[i].path, "DistProxy.o") 
+				!= StringUtil.NOT_FOUND) {
+				pointerProxy = i
+			}
+		}		
+		// adding content to list in the object
+		Object objects[] = remote.loadedComponents[pointerProxy].class.getObjects("data.adt.List")
+		List list = objects[0]
+		while (list.getLength() > 0) {
+			list.remove(list.getFirst())
+		}
+	}
+
 	void handleRequest(TCPSocket client) {
 		// reading data from socket -- this could be optimised
 		char buf[] = null
@@ -74,7 +96,11 @@ component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocke
 		}
 		// processing command
 		String helper[] = strUtil.explode(command, "!")
-		startRemoteProcess(helper[0].string, helper[1].string)
+		if (helper[0].string == "../distributor/RemoteList.o") {
+			startRemoteProcess(helper[0].string, helper[1].string)
+		} else {
+			clearState()
+		}
 	}
 
 	int App:main(AppParam params[]) {

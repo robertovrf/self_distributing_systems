@@ -188,12 +188,19 @@ component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder 
 	}
 	
 	void AdaptEvents:inactive() {
+		content = getContents()
+		char msg[] = new char[]("clearList!")
+		sendMsgToRemoteDist(msg)
 	}
 	
 	// this is extremely hardcoded! ):
 	void AdaptEvents:active() {
 		char state[] = parser.jsonFromArray(content, null)
 		char msg[] = new char[]("../distributor/RemoteList.o!", state)
+		sendMsgToRemoteDist(msg)
+	}
+
+	void sendMsgToRemoteDist(char msg[]) {
 		TCPSocket remoteDist = new TCPSocket()
 		if (!remoteDist.connect("localhost", 8081)) { 
 			out.println("Connection error!")
@@ -209,5 +216,4 @@ component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder 
 		remoteDist.send(msg)
 		remoteDist.disconnect()
 	}
-	
 }
