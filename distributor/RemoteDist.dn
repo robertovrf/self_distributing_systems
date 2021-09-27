@@ -9,14 +9,17 @@ data Int {
 
 const char debugMSG[] = "[@RemoteDist]"
 
-component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocket, 
+const int DEFAULT_DIST_PORT = 8081
+const int DEFAULT_APP_PORT  = 2010
+
+component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocket,
 	data.StringUtil strUtil, composition.RecursiveLoader rl, data.json.JSONEncoder encoder,
 	data.IntUtil iu {
 
+	App app = null
 	LoadedComponents remote = null
 	int portDist = 0
 	int portApp = 0
-	App app
 	bool running = false
 
 	void startApp(IDC main, AppParam params[]) {
@@ -25,7 +28,7 @@ component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocke
 			main.callInterface(app, "Service", typeof(Service), Service.[start()], null)
 		}
 		app.main(params)
-	} 
+	}
 
 	void startRemoteProcess(char remoteP[], char state[]) {
 		// load and start relocated component
@@ -36,21 +39,21 @@ component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocke
 			params[0].string = iu.intToString(portApp)
 			asynch::startApp(remote.mainComponent, params)
 			out.println("$(debugMSG) Remote Component $(remoteP) Started! ")
-			running = true			
+			running = true
 		}
 
 		// locating the right object to set remote state
 		int pointerProxy = 0
 		for (int i = 0; i < remote.loadedComponents.arrayLength; i++) {
-			if (strUtil.find(remote.loadedComponents[i].path, "DistProxy.o") 
+			if (strUtil.find(remote.loadedComponents[i].path, "DistProxy.o")
 				!= StringUtil.NOT_FOUND) {
 				pointerProxy = i
 			}
 		}
 
 		// parsing state to Data
-		Int content[] = encoder.jsonToArray(state, typeof(Int[]), null) 
-		
+		Int content[] = encoder.jsonToArray(state, typeof(Int[]), null)
+
 		// adding content to list in the object
 		Object objects[] = remote.loadedComponents[pointerProxy].class.getObjects("data.adt.List")
 		List list = objects[0]
@@ -60,16 +63,16 @@ component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocke
 		out.println("$(debugMSG) State inserted!")
 	}
 
-	// TODO: need to pause component, wait for object to finish processing 
+	// TODO: need to pause component, wait for object to finish processing
 	// any threads it is currently running, etc.
 	void clearState() {
 		int pointerProxy = 0
 		for (int i = 0; i < remote.loadedComponents.arrayLength; i++) {
-			if (strUtil.find(remote.loadedComponents[i].path, "DistProxy.o") 
+			if (strUtil.find(remote.loadedComponents[i].path, "DistProxy.o")
 				!= StringUtil.NOT_FOUND) {
 				pointerProxy = i
 			}
-		}		
+		}
 		// adding content to list in the object
 		Object objects[] = remote.loadedComponents[pointerProxy].class.getObjects("data.adt.List")
 		List list = objects[0]
@@ -88,7 +91,7 @@ component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocke
 			len++
 			//stop condition
 			if (len >= 4) {
-				if ((command[len-4] == "\r") && (command[len-3] == "\r") && 
+				if ((command[len-4] == "\r") && (command[len-3] == "\r") &&
 					(command[len-2] == "\r") && (command[len-1] == "\r")) {
 					break
 				}
@@ -104,16 +107,18 @@ component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocke
 	}
 
 	int App:main(AppParam params[]) {
-		portDist = 8081
-		portApp = 2010
-		if (params.arrayLength > 0) { 
+
+		if (params.arrayLength == 2) {
 			portDist = iu.intFromString(params[0].string)
 			portApp = iu.intFromString(params[1].string)
+		} else {
+			portDist = DEFAULT_DIST_PORT
+			portApp = DEFAULT_APP_PORT
 		}
 
 		// instantiating variables
 		TCPServerSocket host = new TCPServerSocket()
-	
+
 		// binding server socket
 		if (!host.bind(TCPServerSocket.ANY_ADDRESS, portDist)) {
 			out.println("Error: failed to bind master socket")
