@@ -2,15 +2,15 @@ data Int {
 	int i
 }
 
-component provides server.Server requires io.Output out, data.adt.List list, 
+component provides server.Server requires io.Output out, data.adt.List list,
 	http.HTTPUtil httpUtil, data.IntUtil iu {
 
 	void Server:process(HTTPMessage msg) {
 		if (msg.command == "GET") {
-			if (list.getLength() == 0) {
-				sendResponse(msg, "EMPTY")	
+			Data nums[] = list.getContents()
+			if (nums.arrayLength == 0) {
+				sendResponse(msg, "EMPTY")
 			} else {
-				Data nums[] = list.getContents()
 				char result[] = new char[]("[")
 				for (int i = 0; i < nums.arrayLength; i++) {
 					Int num = nums[i]
