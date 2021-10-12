@@ -2,11 +2,12 @@ uses App
 uses Service
 uses data.String
 
-const char HELP[]         = "help"
-const char LOAD_BALANCE[] = "load_balance"
-const char GROUP[]        = "group"
-const char LOCAL[]        = "local"
-const char EXIT[]         = "exit"
+const char HELP[]      = "help"
+const char ALTERNATE[] = "alternate"
+const char PROPAGATE[] = "propagate"
+const char SHARDING[]  = "sharding"
+const char LOCAL[]     = "local"
+const char EXIT[]      = "exit"
 
 component provides App requires io.Output out, composition.RecursiveLoader rl,
 	data.StringUtil strUtil, data.IntUtil iu, io.Input in, composition.Adapter adapter {
@@ -19,9 +20,10 @@ component provides App requires io.Output out, composition.RecursiveLoader rl,
 	void help() {
 		out.println("Command list:")
 		out.println(" $(HELP) - to list all commands")
-		out.println(" $(LOAD_BALANCE) - to distribute list with load balancing")
-		out.println(" $(GROUP) - to distribute list with group communication")
-		out.println(" $(LOCAL) - bring list locally")
+		out.println(" $(ALTERNATE) - to distribute list alternating requests between replicas")
+		out.println(" $(PROPAGATE) - to distribute list propagating write requests to all replicas")
+		out.println(" $(SHARDING) - to distribute list with sharding")
+		out.println(" $(LOCAL) - to bring list locally")
 		out.println(" $(EXIT) - to finish execution")
 	}
 
@@ -91,11 +93,14 @@ component provides App requires io.Output out, composition.RecursiveLoader rl,
 			if (cmd == HELP) {
 				help()
 
-			} else if (cmd == LOAD_BALANCE) {
-				distribute("ListCPLoadBalance.o")
+			} else if (cmd == PROPAGATE) {
+				distribute("ListCPPropagate.o")
 
-			} else if (cmd == GROUP) {
-				distribute("ListCPGroup.o")
+			} else if (cmd == ALTERNATE) {
+				distribute("ListCPAlternate.o")
+
+			} else if (cmd == SHARDING) {
+				distribute("ListCPSharding.o")
 
 			} else if (cmd == LOCAL) {
 				local()
