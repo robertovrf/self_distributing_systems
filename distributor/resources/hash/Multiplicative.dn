@@ -1,0 +1,5 @@
+interface Multiplicative {
+	
+	// TODO: try to make this generic
+	int h(dec k, dec m)
+}
