@@ -39,8 +39,6 @@ component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder 
 {
 	IPAddr remoteDistsIps[] = null
 	IPAddr remoteListsIps[] = null
-	int pointer = 0
-	Mutex pointerLock = new Mutex()
 
 	void setupRemoteDistsIPs() {
 		if (remoteDistsIps == null) {
@@ -197,25 +195,11 @@ component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder 
 		char content2[] = new char[](requestStr, "!", " ", "\r\r\r\r")
 		// get the contents from all replicas
 		setupRemoteListsIPs()
-		// TODO: is there a way to create dynamic array?
-		int totalContents = 0
-		mutex(pointerLock) {
-			for (int i = 0; i < remoteListsIps.arrayLength; i++) {
-				pointer = i
-				totalContents += getLength()
-			}
-		}
-		Int contents[] = new Int[totalContents]
-		int lastIdx = 0
+		Int contents[] = null
 		for (int i = 0; i < remoteListsIps.arrayLength; i++) {
 			Response response = makeRequest(remoteListsIps[i], content2, true)
 			Int nums[] = parser.jsonToArray(response.value, typeof(Int[]), null)
-			int j = 0
-			while (j < nums.arrayLength) {
-				contents[lastIdx+j] = nums[j]
-				j++
-			}
-			lastIdx = j
+			contents = new Int[](contents, nums)
 		}
 		return contents
 	}
