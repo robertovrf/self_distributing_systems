@@ -1,11 +1,8 @@
-component provides hash.Multiplicative requires util.Math math, 
-  io.Output out, data.DecUtil du, data.IntUtil iu    
-{
+component provides hash.Multiplicative requires util.Math math {
 
   int Multiplicative:h(dec k, dec m) {
     dec A = 0.5 * (math.sqrt(5) - 1)
     dec s = k * A
-    // TODO: see a better way to get the fractional part, since % doesn't work
     int aux = s
     dec x = s - aux
     int hash = math.floor(m * x)
