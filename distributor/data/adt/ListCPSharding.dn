@@ -24,6 +24,10 @@ data Int {
 	int i
 }
 
+data ShardState {
+	Int state[]
+}
+
 /* Available list operations */
 const char ADD[]          = "add"
 const char GET_LENGTH[]   = "getLength"
@@ -61,13 +65,6 @@ component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder 
 			remoteListsIps[1] = new IPAddr()
 			remoteListsIps[1].ip = new char[](LOCALHOST)
 			remoteListsIps[1].port = 2011
-		}
-	}
-
-	void sendMsgToRemoteDists(char msg[]) {
-		setupRemoteDistsIPs()
-		for (int i = 0; i < remoteDistsIps.arrayLength; i++) {
-			makeRequest(remoteDistsIps[i], msg, false)
 		}
 	}
 
@@ -228,13 +225,28 @@ component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder 
 	void AdaptEvents:inactive() {
 		content = getContents()
 		char msg[] = new char[]("clearList!")
-		sendMsgToRemoteDists(msg)
+		setupRemoteDistsIPs()
+		for (int i = 0; i < remoteDistsIps.arrayLength; i++) {
+			makeRequest(remoteDistsIps[i], msg, false)
+		}
 	}
 
 	// this is extremely hardcoded! ):
 	void AdaptEvents:active() {
-		char state[] = parser.jsonFromArray(content, null)
-		char msg[] = new char[]("../distributor/RemoteList.o!", state)
-		sendMsgToRemoteDists(msg)
+		setupRemoteDistsIPs()
+		ShardState shardState[] = new ShardState[remoteDistsIps.arrayLength]
+		for (int i = 0; i < content.arrayLength; i++) {
+			Int num = content[i]
+			int remoteIdx = hash.h(num.i, remoteDistsIps.arrayLength)
+			if (shardState[remoteIdx] == null) {
+				shardState[remoteIdx] = new ShardState()
+			}
+			shardState[remoteIdx].state = new Int[](shardState[remoteIdx].state, num)
+		}
+		for (int i = 0; i < remoteDistsIps.arrayLength; i++) {
+			char state[] = parser.jsonFromArray(shardState[i].state, null)
+			char msg[] = new char[]("../distributor/RemoteList.o!", state)
+			makeRequest(remoteDistsIps[i], msg, false)
+		}
 	}
 }
