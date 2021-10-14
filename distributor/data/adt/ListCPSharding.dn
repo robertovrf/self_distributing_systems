@@ -175,15 +175,20 @@ component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder 
 		//TODO
 	}
 
-	// TODO: from where it will get the lenght?
 	int List:getLength() {
+		// build request
 		Request request = new Request()
 		request.functionName = GET_LENGTH
 		request.numParams = 0
 		char requestStr[] = parser.jsonFromData(request, null)
 		char content2[] = new char[](requestStr, "!", " ", "\r\r\r\r")
-		Response response = makeRequest(remoteListsIps[pointer], content2, true)
-		return iu.intFromString(response.value)
+		// get the length from each replica to return the full length
+		int totalContents = 0
+		for (int i = 0; i < remoteListsIps.arrayLength; i++) {
+			Response response = makeRequest(remoteListsIps[i], content2, true)
+			totalContents += iu.intFromString(response.value)
+		}
+		return totalContents
 	}
 
 	Data[] List:getContents(opt Type t) {
