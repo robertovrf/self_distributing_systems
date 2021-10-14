@@ -20,10 +20,6 @@ data IPAddr {
 	int port
 }
 
-data Num {
-  Int item
-}
-
 data Int {
 	int i
 }
@@ -38,8 +34,8 @@ const char CLEAR_LIST[]   = "clearList"
 const char LOCALHOST[] = "localhost"
 
 component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder parser,
-	net.TCPSocket, data.StringUtil strUtil, io.Output out, data.IntUtil iu, 
-	hash.Multiplicative hash 
+	net.TCPSocket, data.StringUtil strUtil, io.Output out, data.IntUtil iu,
+	hash.Multiplicative hash
 {
 	IPAddr remoteDistsIps[] = null
 	IPAddr remoteListsIps[] = null
@@ -143,11 +139,9 @@ component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder 
 		char content2[] = new char[](requestStr, "!", param, "\r\r\r\r")
 		// get the replica IP based on the item hash
 		setupRemoteListsIPs()
-		// TODO: see if there is a better way to do this
-		Num num = new Num(item)
-		int key = num.item.i
-		IPAddr addr = remoteListsIps[hash.h(key, remoteListsIps.arrayLength)]
-
+		Int num = item
+		IPAddr addr = remoteListsIps[hash.h(num.i, remoteListsIps.arrayLength)]
+		// send to remote list
 		makeRequest(addr, content2, false)
 	}
 
