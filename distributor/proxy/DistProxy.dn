@@ -38,14 +38,6 @@ component provides proxy.DistProxy requires io.Output out, data.IntUtil iu, net.
 
 		response.status = 1
 		response.value = ""
-		Data nums[] = list.getContents()
-		char result[] = new char[]("[")
-		for (int i = 0; i < nums.arrayLength; i++) {
-			Int num = nums[i]
-			result = new char[](result, " ", iu.intToString(num.i))
-		}
-		result = new char[](result, " ]")
-		out.println("$(result)")
 
 		return response
 	}
@@ -63,7 +55,7 @@ component provides proxy.DistProxy requires io.Output out, data.IntUtil iu, net.
 		Response response = new Response()
 
 		Data nums[] = list.getContents()
-		Int result[] = new Int[list.getLength()]
+		Int result[] = new Int[nums.arrayLength]
 		for (int i = 0; i < nums.arrayLength; i++) {
 			result[i] = nums[i]
 		}
