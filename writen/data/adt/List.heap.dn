@@ -1,0 +1,229 @@
+data Node {
+  int key
+}
+
+component provides List:heap(Destructor, AdaptEvents) requires io.Output out, data.IntUtil iu {
+
+  Node heap[] = null
+  int length = 0
+  Mutex heapLock = new Mutex()
+
+  /*
+   * Add item to heap.
+   *
+   * Note that we keep the max-heap property
+   * on inserts. That means processing time
+   * on write operations.
+   */
+	void List:add(Data item) {
+    mutex(heapLock) {
+      if (length == 0) {
+        heap = new Node[]()
+      }
+      // Insert at the end (this will 
+      // violate the heap property)
+      Node node = item
+      heap = new Node[](heap, node)
+      length++
+      
+      // shift up the nodes until the heap  
+      // property has been reestablished
+      int idx = length - 1
+      int parentIdx = (idx - 1) / 2
+      while (idx > 0 && heap[parentIdx].key < heap[idx].key) {
+        Node aux = heap[parentIdx]
+        heap[parentIdx] = heap[idx]
+        heap[idx] = aux
+
+        idx = parentIdx
+        parentIdx = (idx - 1) / 2
+      }
+
+      char result[] = new char[]("[")
+      for (int i = 0; i < length; i++) {
+        result = new char[](result, " ", iu.intToString(heap[i].key))
+      }
+      result = new char[](result, " ]")
+      out.println("$(result)")
+    }
+	}
+
+  /*
+   * Remove a node from heap.
+   * 
+   * Note that we keep the max-heap property.
+   */
+	void List:remove(Data item) {
+    mutex(heapLock) {
+      Node itemToRemove = item
+      int itemIdx = 0
+      for (int i = 0; i < length; i++) {
+        if (heap[i] == itemToRemove) {
+          itemIdx = i
+          heap[i] = heap[length-1]
+          break
+        }
+      }
+      length--
+      heapify(heap, length, itemIdx)
+    }
+	}
+
+	void List:update(Data item, Data newVersion) {
+		// TODO
+	}
+
+  /*
+   * Return the first node.
+   */
+	Data List:getFirst() {
+    mutex(heapLock) {
+      Data item = heap[0]
+      return item
+    }
+	}
+
+	Data List:getNext() {
+		// TODO
+		return null
+	}
+
+	bool List:isEnd() {
+		// TODO
+		return false
+	}
+
+	Data List:getIndex(int ndx) {
+		// TODO
+		return null
+	}
+
+	void List:setIndex(int ndx, Data d) {
+		//TODO
+	}
+
+  /*
+   * Return the heap length.
+   */
+	int List:getLength() {
+    mutex(heapLock) {
+			return length
+		}
+	}
+
+  /*
+   * Return the heap contents.
+   *
+   * Just return the content (no processing time).
+   */
+	Data[] List:getContents(opt Type t) {
+		mutex(heapLock) {
+      if (heap == null) { 
+        return new Data[] 
+      }
+
+      Data items[]
+      if (isset t) {
+        items = new Data[length] from t
+      } else {
+        items = new Data[length]
+      }
+
+      for (int i = 0; i < length; i++) {
+        items[i] = heap[i]
+      }
+
+      return items
+    }
+	}
+
+  /*
+   * Build a Max-Heap from an array.
+   */
+	Node[] buildMaxHeap(Node arrange[]) {
+    Node newHeap[] = new Node[](arrange)
+
+    int n = newHeap.arrayLength
+    dec startIdx = (n / 2) - 1
+    
+    dec idx = startIdx
+    while (idx >= 0) {
+      int i = idx
+      heapify(newHeap, n, i)
+      idx -= 1
+    }
+
+    return newHeap
+	}
+
+  /*
+   * Heapify in-place a subtree rooted with node i,
+   * which is an index in an arrange with length n.
+   */
+  void heapify(Node arrange[], int n, int i) {
+    int largest = i
+    dec l = 2*i + 1
+    int left = l
+    dec r = 2*i + 2
+    int right = r
+
+    if (left < n && arrange[left].key > arrange[largest].key) {
+      largest = left
+    }
+
+    if (right < n && arrange[right].key > arrange[largest].key) {
+      largest = right
+    }
+
+    if (largest != i) {
+      Node aux = arrange[i]
+      arrange[i] = arrange[largest]
+      arrange[largest] = aux
+      heapify(arrange, n, largest)
+    }
+  }
+
+  /*
+   * Create the heap from an array.
+   */
+  void createHeap(Data items[]) {
+    mutex(heapLock) {
+      clearList()
+      Node arrange[] = new Node[]()
+      for (int i = 0; i < items.arrayLength; i++) {
+        Node node = items[i]
+        arrange = new Node[](arrange, node)
+      }
+      heap = buildMaxHeap(arrange)
+      length = heap.arrayLength
+    }
+  }
+
+  /*
+   * Clone contents from other object into the heap.
+   */
+	bool List:clone(Object o) {
+    List src = o
+		Data items[] = src.getContents()
+		createHeap(items)
+
+		return true
+	}
+
+	void clearList() {
+		heap = null
+    length = 0
+	}
+
+  void Destructor:destroy() {
+		clearList()
+	}
+
+  void AdaptEvents:inactive() {
+  	content = heap
+	}
+
+	void AdaptEvents:active() {
+		createHeap(content)
+	}
+}
