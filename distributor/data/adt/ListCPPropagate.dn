@@ -33,7 +33,7 @@ const char CLEAR_LIST[]   = "clearList"
 /* IPs */
 const char LOCALHOST[] = "localhost"
 
-component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder parser,
+component provides List:heap(Destructor, AdaptEvents) requires data.json.JSONEncoder parser,
 	net.TCPSocket, net.TCPServerSocket, data.StringUtil strUtil, io.Output out, data.IntUtil iu {
 
 		IPAddr remoteDistsIps[] = null
@@ -68,7 +68,7 @@ component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder 
 		void sendMsgToRemoteDists(char msg[]) {
 			setupRemoteDistsIPs()
 			for (int i = 0; i < remoteDistsIps.arrayLength; i++) {
-				connectAndSend(remoteDistsIps[i], msg, false)
+				connectAndSend(remoteDistsIps[i], msg, true)
 			}
 		}
 
@@ -231,15 +231,19 @@ component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder 
 	}
 
 	void AdaptEvents:inactive() {
-		content = getContents()
-		char msg[] = new char[]("clearList!")
-		sendMsgToRemoteDists(msg)
+		if (content != null) {
+			content = getContents()
+			char msg[] = new char[]("clearList!\r\r\r\r")
+			sendMsgToRemoteDists(msg)
+		}
 	}
 
 	// this is extremely hardcoded! ):
 	void AdaptEvents:active() {
-		char state[] = parser.jsonFromArray(content, null)
-		char msg[] = new char[]("../distributor/RemoteList.o!", state)
-		sendMsgToRemoteDists(msg)
+		if (content != null) {
+			char state[] = parser.jsonFromArray(content, null)
+			char msg[] = new char[]("../distributor/RemoteList.o!", state, "\r\r\r\r")
+			sendMsgToRemoteDists(msg)
+		}
 	}
 }

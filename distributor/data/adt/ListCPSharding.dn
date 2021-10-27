@@ -37,7 +37,7 @@ const char CLEAR_LIST[]   = "clearList"
 /* IPs */
 const char LOCALHOST[] = "localhost"
 
-component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder parser,
+component provides List:heap(Destructor, AdaptEvents) requires data.json.JSONEncoder parser,
 	net.TCPSocket, data.StringUtil strUtil, io.Output out, data.IntUtil iu,
 	hash.Multiplicative hash
 {
@@ -223,30 +223,34 @@ component provides List(Destructor, AdaptEvents) requires data.json.JSONEncoder 
 	}
 
 	void AdaptEvents:inactive() {
-		content = getContents()
-		char msg[] = new char[]("clearList!")
-		setupRemoteDistsIPs()
-		for (int i = 0; i < remoteDistsIps.arrayLength; i++) {
-			makeRequest(remoteDistsIps[i], msg, false)
+		if (content != null) {
+			content = getContents()
+			char msg[] = new char[]("clearList!\r\r\r\r")
+			setupRemoteDistsIPs()
+			for (int i = 0; i < remoteDistsIps.arrayLength; i++) {
+				makeRequest(remoteDistsIps[i], msg, true)
+			}
 		}
 	}
 
 	// this is extremely hardcoded! ):
 	void AdaptEvents:active() {
-		setupRemoteDistsIPs()
-		ShardState shardState[] = new ShardState[remoteDistsIps.arrayLength]
-		for (int i = 0; i < content.arrayLength; i++) {
-			Int num = content[i]
-			int remoteIdx = hash.h(num.i, remoteDistsIps.arrayLength)
-			if (shardState[remoteIdx] == null) {
-				shardState[remoteIdx] = new ShardState()
+		if (content != null) {
+			setupRemoteDistsIPs()
+			ShardState shardState[] = new ShardState[remoteDistsIps.arrayLength]
+			for (int i = 0; i < content.arrayLength; i++) {
+				Int num = content[i]
+				int remoteIdx = hash.h(num.i, remoteDistsIps.arrayLength)
+				if (shardState[remoteIdx] == null) {
+					shardState[remoteIdx] = new ShardState()
+				}
+				shardState[remoteIdx].state = new Int[](shardState[remoteIdx].state, num)
 			}
-			shardState[remoteIdx].state = new Int[](shardState[remoteIdx].state, num)
-		}
-		for (int i = 0; i < remoteDistsIps.arrayLength; i++) {
-			char state[] = parser.jsonFromArray(shardState[i].state, null)
-			char msg[] = new char[]("../distributor/RemoteList.o!", state)
-			makeRequest(remoteDistsIps[i], msg, false)
+			for (int i = 0; i < remoteDistsIps.arrayLength; i++) {
+				char state[] = parser.jsonFromArray(shardState[i].state, null)
+				char msg[] = new char[]("../distributor/RemoteList.o!", state, "\r\r\r\r")
+				makeRequest(remoteDistsIps[i], msg, true)
+			}
 		}
 	}
 }

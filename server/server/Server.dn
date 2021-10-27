@@ -2,7 +2,7 @@ data Int {
 	int i
 }
 
-component provides server.Server requires io.Output out, data.adt.List list,
+component provides server.Server requires io.Output out, data.adt.List:heap list,
 	http.HTTPUtil httpUtil, data.IntUtil iu {
 
 	void Server:process(HTTPMessage msg) {

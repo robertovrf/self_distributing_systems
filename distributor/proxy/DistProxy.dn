@@ -25,7 +25,7 @@ const char GET_LENGTH[]   = "getLength"
 const char GET_CONTENTS[] = "getContents"
 
 component provides proxy.DistProxy requires io.Output out, data.IntUtil iu, net.TCPSocket,
-	net.TCPServerSocket, data.adt.List list, data.json.JSONEncoder parser, data.StringUtil strUtil  {
+	net.TCPServerSocket, data.adt.List:heap list, data.json.JSONEncoder parser, data.StringUtil strUtil  {
 
 	bool serviceStatus
 	TCPServerSocket host

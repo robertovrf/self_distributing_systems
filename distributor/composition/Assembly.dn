@@ -1,0 +1,924 @@
+// Assembly module
+//
+// This version:
+// 1. implements a simplified representation of the software configs to reduce code complexity;
+// 2. handles cycles in the target software architectural graph by loading components once;
+// 3. allows insertion and removal of components at runtime;
+// 4. supports proxy;
+// 5. supports relocation and replication of specific interfaces;
+// 
+// Author: Roberto Rodrigues Filho
+// Creation: February @ 2017
+// Update: October @ 2021
+
+
+data Interface {
+	IntfName name
+	String compVariants[] 
+}
+
+data IntfName {
+	char package[]
+	char alias[]
+	char semantic[]
+}
+
+data NativeIntfs {
+	char package[]
+	char alias[]
+}
+
+data Component {
+	char name[]
+	bool connected // verify if component's dependencies are connected at the Dana VM level
+	bool proxy // if component is a proxy
+	IntfName iProvide[] // this is necessary to adding more components to the configs
+	IntfName dependencies[] // list of required interfaces
+	Binding requiresMe[] // pointer to component that I connect to
+	Binding iRequire[] // pointer to components connected to me
+	IDC class // verify if component is loaded or not (when unloading component remember to set it to null)
+	NativeIntfs natIntfs[] // array with the name of the native interfaces
+	bool classB
+}
+
+data Binding {
+	int compPointer // points to the component in the component array in Config 
+	char intfAlias[]
+	char intfSemantic[]
+}
+
+data Config {
+	char description[]
+	Component components[]
+	String listCompNames[] // list of components name
+	String listRelations[] // how components connect to each other
+}
+
+const char debugMSG[] = "[@Assembly]"
+
+// TODO: implement mechanisms to handle concurrency and avoid race conditions 
+// (it's important now that we're adding and removing components).
+// TODO: if target app is in the CST you'll have to use the absolute path to avoid config replication (implement the code
+// that'll make this warning true. :)
+// TODO: revise all variable names to make sure they make sense (tip: relationList or listRelations? confusing!).
+// TODO: make it possible to pass parameters to app.
+// TODO: make it possible to load components even if the main component does not provide interface App.
+// TODO: create a way to test the functions of the Assembly module. So we can add it to the CST.
+// How can I make sure this version works??
+// TODO: this version has a toy implementation of the relocation and replication -- make this new feature better!
+// TODO: create a version without the RecursiveLoader -- the assembly should be able 
+// to do what the recursive loader does.
+// TODO: setConfig only works if architectural description matches char by char... This is bad... if we decompose 
+// the architectural description into a tree, it'll make the assembly module slower.
+component provides composition.Assembly requires io.Output out, data.IntUtil iu, System system, 
+	composition.Search search, composition.ObjectWriter, data.json.JSONParser parser, Loader loader, 
+	data.StringUtil strUtil, composition.Adapter adapter, NativeLoader nLoader {
+
+	App app = null
+	Config configs[] = null //all possible configurations
+	Interface intfs[] = null //all interfaces in the world -- to prevent loading interfaces twice
+	Component compnts[] = null //all components in the world -- to prevent loading components twice
+	int currentConfig = 0 //this is used to point to current executing config
+
+	char[] Assembly:getConfig() {
+		return configs[currentConfig].description
+	}
+
+	String[] Assembly:getAllConfigs() {
+		String allConfigs[]
+		for (int counter = 0; counter < configs.arrayLength; counter++) {
+			allConfigs = new String[](allConfigs, new String(configs[counter].description))
+		}
+		return allConfigs
+	}
+
+	void Assembly:setMain(char mainComp[], AppParam args[]) {
+		loadConfigs(loadMainIntf(mainComp))
+		recursiveBinding(configs[0].components[0], 0)
+		asynch::startApp(configs[0].components[0].class, args)
+		out.println("$(debugMSG) App started successfully!")
+	}
+
+	// this won't work if arch description does not match exactly, char by char
+	// I'm considering that each set of configs are particular to each assembly -- if it doesn't match, the learner
+	// should re-request a list of the entire set of configs, because it currently has an invalid one...
+	bool Assembly:setConfig(char config[]) {
+		int configPointer
+		if ((configPointer = descriptionMatch(config)) != INT_MAX) {
+			if (configPointer != currentConfig) {
+				// we can get a list of common comps pointing at the old comps (configs[currentPointer])
+				// or at the new config comps (configs[configPointer]), we'll need both for transfering state and
+				// adapting interfaces, to compare the list of required interfaces and perform the adaptation
+				Component newCommonComps[] = commonComponents(configPointer, false)
+				Component oldCommonComps[] = commonComponents(configPointer, true)
+				transferStateBetweenConfigs(newCommonComps, oldCommonComps, configPointer)
+				// newly added components are the ones that are not in the common list of comps
+				// i.e. the comps that is not in the current config -- we use newCommonComps to identify newly added ones
+				bindNewlyAddedComps(newCommonComps, configPointer)
+				adaptInterfaces(newCommonComps, oldCommonComps, configPointer)
+				unloadComps() //unbind current config and unload unused comps!
+				currentConfig = configPointer
+				out.println("$(debugMSG) Config changed successfully!")
+			}
+		} else {
+			out.println("$(debugMSG) Invalid config.")
+			return false
+		}
+		return true
+	}
+
+	bool isInCurrentComposition(String paths[]) {
+		for (int pointer = 0; pointer < paths.arrayLength; pointer++) {
+			if (isCompPathInCompList(paths[pointer].string, configs[currentConfig].components)) {
+				return true
+			}
+		}
+		return false
+	}
+
+	char[] getDescriptionWithNoComps(String paths[]) {
+		for (int pointer = 0; pointer < configs.arrayLength; pointer++) {
+			if (pointer != currentConfig) {
+				bool itIs = false
+				for (int pointer2 = 0; pointer2 < paths.arrayLength; pointer2++) {
+					if (isCompPathInCompList(paths[pointer2].string, configs[pointer].components)) {
+						itIs = true
+						break
+					}
+				}
+				if (!itIs) {
+					return configs[pointer].description
+				}
+			}
+		}
+		return null
+	}
+
+	void Assembly:removeComp(String compPaths[]) {
+		/* verify if one of the compPaths is in current config, if it is change to a diff composition */
+		if (isInCurrentComposition(compPaths)) {
+			char newRandComp[]
+			if ((newRandComp = getDescriptionWithNoComps(compPaths)) != null) {
+				setConfig(newRandComp)
+			} else {
+				throw new Exception("Can't remove these components. One of them is present in all possible compositions.")
+			}
+		}
+		
+		/* Remove components */
+		String compsToRemove[] = filterCompsToRemove(compPaths)
+		if (compsToRemove.arrayLength > 0) {
+			char currentConfigDescription[] = configs[currentConfig].description
+			// step 1) remove configs that has any of the 'to remove components' in them
+			Config newConfigs[]
+			for (int configPointer = 0; configPointer < configs.arrayLength; configPointer++) {	
+				bool maintainConfig = true// all configs should be copied, except when one comp of the list of compsToRemove is in config...
+				for (int pointer = 0; pointer < compsToRemove.arrayLength; pointer++) {
+					if (isCompPathInCompList(compsToRemove[pointer].string, configs[configPointer].components)) {
+						maintainConfig = false
+						break
+					}	
+				}
+				if (maintainConfig) { newConfigs = new Config[](newConfigs, configs[configPointer])	}
+			}
+			configs = newConfigs
+			// step 2) remove components from the global list of components
+			Component newCompnts[]
+			for (int compPointer = 0; compPointer < compnts.arrayLength; compPointer++) {
+				bool maintainComp = true
+				for (int pointer = 0; pointer < compsToRemove.arrayLength; pointer++) {
+					if (compsToRemove[pointer].string == compnts[compPointer].name) {
+						maintainComp = false
+						break
+					}
+				}
+				if (maintainComp) { newCompnts = new Component[](newCompnts, compnts[compPointer]) }
+			}
+			compnts = newCompnts
+			// step 3) remove components from them global list of interfaces
+			for (int intfPointer = 0; intfPointer < intfs.arrayLength; intfPointer++) {
+				String variants[] = null
+				for (int varPointer = 0; varPointer < intfs[intfPointer].compVariants.arrayLength; varPointer++) {
+					bool maintainVar = true
+					for (int pointer = 0; pointer < compsToRemove.arrayLength; pointer++) {
+						if (intfs[intfPointer].compVariants[varPointer].string == compsToRemove[pointer].string) {
+							maintainVar = false
+							break
+						}	
+					}
+					if (maintainVar) { variants = new String[](variants, intfs[intfPointer].compVariants[varPointer]) }	
+				}
+				intfs[intfPointer].compVariants = variants
+			}
+			// step 4) update the currentConfig pointer (it might be pointing to the wrong config after removing some)
+			for (int configPointer = 0; configPointer < configs.arrayLength; configPointer++) {		
+				if (configs[configPointer].description == currentConfigDescription) {
+					currentConfig = configPointer
+					break
+				}
+			}
+			out.println("$(debugMSG) Component removed successfully!")
+		}
+	}
+	
+	void Assembly:addComp(String compPaths[]) {
+		// step 1) remove the components that have already been loaded
+		String newComps[] = filterLoadedComps(compPaths) 
+		if (newComps.arrayLength > 0) {
+			// step 2) load the new comps and add only the valid new comps to global interface and to global components list
+			for (int compPointer = 0; compPointer < newComps.arrayLength; compPointer++) {
+				Component newComp = loadComponent(newComps[compPointer].string)
+				if (isCompValidToAdd(newComp)) {
+					compnts = new Component[](compnts, newComp)// add to list of global components
+					updateGlobalInterfacesWith(newComp) // add newComp to the compVariants list of all interfaces it provides
+				}
+			}
+			// step 3) re-generate all configs (from memory -- no searching or loading new components)
+			char runningConfig[] = configs[currentConfig].description
+			Component runningComps[] = configs[currentConfig].components
+			configs = null
+			loadConfigs(intfs[0])
+			// step 4) transfering state of previously running config to the new objects of the same config 
+			// and update currentConfig to point to the config (after adding the current config my change its position in the array)
+			for (int configPointer = 0; configPointer < configs.arrayLength; configPointer++) {
+				if (configs[configPointer].description == runningConfig) {
+					currentConfig = configPointer
+					configs[configPointer].components = runningComps
+				}
+			}
+			out.println("$(debugMSG) Component(s) successfully added.")
+		}
+	}
+
+	/* I think I need to collapse these two functions into one */
+	//TODO: Maybe it's worth having a pointer from the configs component to the compnts array.
+	// It is in the compnts array that the names of required and provided interfaces are at.
+	IDCReference[] Assembly:getCompsByProvidedInterface(char providedIntf[]) {
+		IDCReference refs[] = null
+		for (int compPointer = 0; compPointer < configs[currentConfig].components.arrayLength; compPointer++) {
+			for (int compPointer2 = 0; compPointer2 < compnts.arrayLength; compPointer2++) {
+				if (configs[currentConfig].components[compPointer].name == compnts[compPointer2].name) {
+					IntfName providedIntfs[] = compnts[compPointer2].iProvide
+					for (int intfsPointer = 0; intfsPointer < providedIntfs.arrayLength; intfsPointer++) {
+						if (providedIntfs[intfsPointer].alias == providedIntf) {
+							refs = new IDCReference[](refs, 
+								new IDCReference(configs[currentConfig].components[compPointer].name,
+								configs[currentConfig].components[compPointer].class))
+						}
+					}
+				}
+			}
+		}
+		return refs
+	}
+
+	// NOTE: Expanded this to add more info about the components (the name of the components that requires them
+	// and the components that they require)
+	IDCReference[] Assembly:getComponents(String paths[]) {
+		IDCReference refs[] = null
+		for (int compPointer = 0; compPointer < configs[currentConfig].components.arrayLength; compPointer++) {
+			for (int compPointer2 = 0; compPointer2 < paths.arrayLength; compPointer2++) {
+				if (configs[currentConfig].components[compPointer].name == paths[compPointer2].string) {
+					// if component is proxy, it returns the name of the component the proxy is monitoring
+					// E.g. HTTPGET or HTTPCH, etc. instead of HTTPProxy
+					// otherwise it is just the name of the component
+					if (configs[currentConfig].components[compPointer].proxy) {
+						Binding iRequire[] = configs[currentConfig].components[compPointer].iRequire
+						Binding iProvide[] = configs[currentConfig].components[compPointer].requiresMe
+						int commonIntfPointer = getCommonIntf(iRequire, iProvide)
+						if (commonIntfPointer == INT_MAX) {
+							out.println("$(debugMSG) Error: a PROXY that does not have a common provided and required interface!")
+							refs = new IDCReference[](refs, 
+								new IDCReference(configs[currentConfig].components[compPointer].name,
+								configs[currentConfig].components[compPointer].class))
+						} else {
+							refs = new IDCReference[](refs,
+								new IDCReference(configs[currentConfig].components[commonIntfPointer].name,
+									configs[currentConfig].components[compPointer].class))
+						}
+					} else {
+						refs = new IDCReference[](refs, 
+							new IDCReference(configs[currentConfig].components[compPointer].name,
+								configs[currentConfig].components[compPointer].class))
+					}
+				}
+			}
+		}
+		return refs
+	}
+
+	int getCommonIntf(Binding iRequire[], Binding iProvide[]) {
+		for (int count = 0; count < iRequire.arrayLength; count++) {
+			for (int count2 = 0; count2 < iProvide.arrayLength; count2++) {
+				if ((iRequire[count].intfAlias == iProvide[count2].intfAlias) && 
+					(iRequire[count].intfSemantic == iProvide[count2].intfSemantic)) { 
+					return iRequire[count].compPointer
+				}
+			}
+		}
+		return INT_MAX
+	}
+
+	String[] filterCompsToRemove(String paths[]) {
+		String result[] = null
+		for (int pointer = 0; pointer < paths.arrayLength; pointer++) {
+			if ((paths[pointer].string != compnts[0].name) &&
+				(isCompPathInCompList(paths[pointer].string, compnts)) &&
+				(!isCompPathInCompList(paths[pointer].string, configs[currentConfig].components))) {
+				result = new String[](result, paths[pointer])
+			}
+		}
+		return result
+	}
+
+	String[] filterLoadedComps(String paths[]) {
+		String result[]
+		for (int pointer = 0; pointer < paths.arrayLength; pointer++) {
+			if (!isCompPathInCompList(paths[pointer].string, compnts)) {
+				result = new String[](result, paths[pointer])
+			}
+		}
+		return result
+	}
+
+	void updateGlobalInterfacesWith(Component comp) {
+		for (int intfPointer = 0; intfPointer < intfs.arrayLength; intfPointer++) {
+			for (int providePointer = 0; providePointer < comp.iProvide.arrayLength; providePointer++) {
+				if ((comp.iProvide[providePointer].alias == intfs[intfPointer].name.alias) 
+					&& (comp.iProvide[providePointer].package == intfs[intfPointer].name.package)) {
+					intfs[intfPointer].compVariants = new String[](intfs[intfPointer].compVariants, new String(new char[](comp.name)))
+					break // I'm assuming a component can't require one interface twice
+				}
+			}
+		}
+	}
+
+	bool isCompPathInCompList(char path[], Component list[]) {
+		for (int pointer = 0; pointer < list.arrayLength; pointer++) {
+			if (path == list[pointer].name) { return true }
+		}
+		return false
+	}
+
+	// a component to be valid can't provide App and should provide at least one interface that is being used
+	bool isCompValidToAdd(Component comp) {
+		bool intfCheck = false
+		for (int pointer = 0; pointer < comp.iProvide.arrayLength; pointer++) {
+			if (comp.iProvide[pointer].alias == "App") { return false }
+			if (!intfCheck) {
+				for (int intfPointer = 0; intfPointer < intfs.arrayLength; intfPointer++) {
+					if ((comp.iProvide[pointer].alias == intfs[intfPointer].name.alias) 
+						&& (comp.iProvide[pointer].package == intfs[intfPointer].name.package)) {
+							intfCheck = true
+					}
+				}	
+			}
+		}
+		return intfCheck
+	}
+
+	// this function works in the context of configuration changes ...
+	// you can either copy the components from current config (oldConfig = true) or from the new config
+	Component[] commonComponents(int configPointer, bool oldConfig) {
+		Component commonComps[]
+		Component comps[] = configs[configPointer].components
+		for (int compPointer = 0; compPointer < comps.arrayLength; compPointer++) {
+			int compPointer2
+			if ((compPointer2 = isComponentInList(comps[compPointer], configs[currentConfig].components)) != INT_MAX) {
+				if (oldConfig) { commonComps = new Component[](commonComps, configs[currentConfig].components[compPointer2]) } 
+				else { commonComps = new Component[](commonComps, comps[compPointer]) }
+			}
+		}
+		return commonComps
+	}
+
+	void adaptInterfaces(Component newCommonComps[], Component oldCommonComps[], int configPointer) {
+		for (int commonPointer = 0; commonPointer < newCommonComps.arrayLength; commonPointer++) {
+			if (newCommonComps[commonPointer].name == oldCommonComps[commonPointer].name) {
+				// -- transfer components, if needed!
+				for (int depCommon = 0; depCommon < newCommonComps[commonPointer].iRequire.arrayLength; depCommon++) {
+					Binding newCommonC = newCommonComps[commonPointer].iRequire[depCommon]
+					Binding oldCommonC = oldCommonComps[commonPointer].iRequire[depCommon]
+					if (configs[configPointer].components[newCommonC.compPointer].name != 
+						configs[currentConfig].components[oldCommonC.compPointer].name) {
+						if (newCommonC.intfSemantic != null) {
+							adapter.adaptRequiredInterface(newCommonComps[commonPointer].class, 
+								new char[](newCommonC.intfAlias, ":", newCommonC.intfSemantic), 
+								configs[configPointer].components[newCommonC.compPointer].class)
+						} else {
+							adapter.adaptRequiredInterface(newCommonComps[commonPointer].class, 
+								newCommonC.intfAlias, 
+								configs[configPointer].components[newCommonC.compPointer].class)
+						}
+					}
+				}
+			} else { throw new Exception("Inconsistent state.") }
+		}
+	}
+
+	// this is not the state of the running components, this is the state of the data structure that is used
+	// to perform adaptation...
+	void transferStateBetweenConfigs(Component newCommonComps[], Component oldCommonComps[], int configPointer) {
+		for (int commonPointer = 0; commonPointer < newCommonComps.arrayLength; commonPointer++) {
+			if (newCommonComps[commonPointer].name == oldCommonComps[commonPointer].name) {
+				// transfer state (class and connected) from old comps to new comps
+				if ((!newCommonComps[commonPointer].connected) && (newCommonComps[commonPointer].class == null)) {
+					newCommonComps[commonPointer].connected = oldCommonComps[commonPointer].connected
+					newCommonComps[commonPointer].class = oldCommonComps[commonPointer].class
+				} else { throw new Exception("Inconsistent state.") }
+				// set common values to null/false on components of old config
+				//TODO: maybe detect that hasProvides Service and call stop here???
+				// before setting class to null?	
+				oldCommonComps[commonPointer].class = null
+				oldCommonComps[commonPointer].connected = false
+			} else { throw new Exception("Inconsistent state.") }
+		}
+	}
+
+	void bindNewlyAddedComps(Component commonComps[], int configPointer) {
+		Component comps[] = configs[configPointer].components
+		for (int compPointer = 0; compPointer < comps.arrayLength; compPointer++) {
+			if (isComponentInList(comps[compPointer], commonComps) == INT_MAX) {
+				recursiveBinding(comps[compPointer], configPointer)
+			}
+		}
+	}
+
+	void unloadComps() {
+		Component comps[] = configs[currentConfig].components
+		for (int compPointer = 0; compPointer < comps.arrayLength; compPointer++) {
+			// Dana can actually detect that some components are not in use anymore and unload them
+			// even if they are connected amongst themselves
+			comps[compPointer].connected = false
+			comps[compPointer].class = null
+		}
+	}
+
+	// returns index of new list, or INT_MAX in case component is not in list
+	int isComponentInList(Component c, Component list[]) {
+		for (int compPointer = 0; compPointer < list.arrayLength; compPointer++) {
+			if (list[compPointer].name == c.name) {	return compPointer }
+		}
+		return INT_MAX
+	}
+
+	int descriptionMatch(char config[]) {
+		for (int configPointer = 0; configPointer < configs.arrayLength; configPointer++) {
+			if (configs[configPointer].description == config) {	return configPointer }
+		}
+		return INT_MAX
+	}
+
+	//void startApp(IDC main) {
+	void startApp(IDC main, AppParam params[]) {
+		app = new App() from main
+		// in case the object app has a secondary interface Service
+		if (main.hasProvides("Service")) {
+			//TODO: update for v234
+			main.callInterface(app, "Service", typeof(Service), Service.[start()], null)
+			//Service service = main.getInterface(app, "Service", typeof(Service))
+			//if (service != null) { service.start() }
+		}
+		app.main(params)
+		// TODO: the Assembly module should pass parameters when starting an app
+		// this parameter passing thingy might change the RESTful API (?) for generality
+		// Once the application finshes it should return something
+		// exitCode = app.main(params)
+		// appFinished = true
+	}
+
+	void recursiveBinding(Component comp, int configPointer) {
+		if (!comp.connected) {
+			// comp.connected = true needs to come first (before actually binding anything)
+			// because the same component might be called recursively
+			// multiple times before it gets all its dependencies satisfied
+			// that will prevent it to satisfy its connections more than once (or get caught in a cycle)
+			comp.connected = true
+			if (comp.class == null) { comp.class = loader.load(comp.name) }
+			for (int nativePointer = 0; nativePointer < comp.natIntfs.arrayLength; nativePointer++) {
+				IDC ncom = nLoader.load(comp.natIntfs[nativePointer].alias)
+				comp.class.wire(comp.natIntfs[nativePointer].alias,
+					ncom, comp.natIntfs[nativePointer].alias)
+			}
+			for (int compPointer = 0; compPointer < comp.iRequire.arrayLength; compPointer++) {
+				Component comp2 = configs[configPointer].components[comp.iRequire[compPointer].compPointer]
+				if (comp2.class == null) { comp2.class = loader.load(comp2.name) }
+				char alias[] = null
+				if (comp.iRequire[compPointer].intfSemantic != null) {
+					alias = new char[](comp.iRequire[compPointer].intfAlias, ":", 
+						comp.iRequire[compPointer].intfSemantic)
+				} else { alias = comp.iRequire[compPointer].intfAlias }
+				comp.class.wire(alias, comp2.class, alias)
+				recursiveBinding(comp2, configPointer)
+			}
+			if (comp.class.hasProvides("Service")) {
+				out.println("$(debugMSG) Starting service on '$(comp.name)'")
+				Service svc = new Service() from comp.class
+				svc.start()
+			}
+		}
+	}
+
+	void loadConfigs(Interface main) {
+		configs = new Config[](new Config())
+		addCompToConfig(main.compVariants[0].string, null, main.name.alias, main.name.semantic, 0, true)
+		generateDescription(0)
+		int configPointer = 1
+		if (configs.arrayLength > 0) {
+			while (configPointer < configs.arrayLength) {
+				loadUntilDone(configPointer)
+				generateDescription(configPointer)
+				configPointer++
+			}
+		}
+	}
+
+	// we need this because some of the components in subsequent configs are not completely loaded
+	// so we have to make sure to go through all of the components and check if they've all been
+	// properly loaded and connected -- this only happens to the "replicated" configs
+	// (i.e. not the first config) because they were copied from the first config at some point
+	// and during that time, it is very likely that the first config were not completely loaded  
+	void loadUntilDone(int configPointer) {
+		for (int counter = 0; counter < configs[configPointer].components.arrayLength; counter++) {
+			Component comp = configs[configPointer].components[counter]
+			if (comp.dependencies.arrayLength != comp.iRequire.arrayLength) {
+				loadingDependencies(comp, configPointer)
+			}
+		}
+	}
+
+	void generateDescription(int configPointer) {
+		configs[configPointer].description = new char[]("|", 
+			dumpListCompNames(configPointer),
+			"|",
+			dumpListRelations(configPointer),
+			"|")
+	}
+
+	char[] dumpListCompNames(int configPointer) {
+		char compNames[]
+		for (int counter = 0; counter < configs[configPointer].listCompNames.arrayLength; counter++) {
+			if (counter == 0) {
+				compNames = new char[](configs[configPointer].listCompNames[counter].string)
+			} else {
+				compNames = new char[](compNames, ",", configs[configPointer].listCompNames[counter].string)
+			}
+		}
+		return compNames
+	}
+
+	char[] dumpListRelations(int configPointer) {
+		char relations[]
+		for (int counter = 0; counter < configs[configPointer].listRelations.arrayLength; counter++) {
+			if (counter == 0) { relations = new char[](configs[configPointer].listRelations[counter].string) }
+			else { relations = new char[](relations, ",", configs[configPointer].listRelations[counter].string) }
+		}
+		return relations
+	}
+
+	// add all components to a config list
+	// change the function signature to name (load the component here as well)
+	// also if it's the first component, requirerCompName will be null 
+	// (if requirerCompName == null && configPointer = 0 && intfAlias == "App"
+	// otherwise throw an exception)
+	void addCompToConfig(char compName[], char requirerCompName[], char intfAlias[], char intfSemantic[], int configPointer, bool loadDep) {
+		Component comp = loadComponent(compName)
+		if (!isComponentInConfig(comp, configPointer)) {
+			insertComponentInConfig(comp, requirerCompName, intfAlias, intfSemantic, configPointer)
+			// loadDep will only be false when inserting a component from replicateConfigWithVariants
+			// that means we're replicating a config and adding a variant to the end of the config
+			// but we're not loading the dependencies in that config, because we're still loading all 
+			// components in the previous config.
+			// also, in order to load all components' dependencies before loading the recent added dependency
+			// beware that the search is supposed to be in depth (if you imagine the tree-structure)
+			// i.e. take one component load its first dependency connect to it, take the first dependency's dependecy
+			// and connect to the component's dependency, and do that before going back to the component and loading
+			// its next dependency
+			if (loadDep) { loadingDependencies(comp, configPointer)	}
+		} else {
+			// point requirerCompName component to the already existing version of comp in the config
+			for (int compPointer = 0; compPointer < configs[configPointer].components.arrayLength; compPointer++) {
+				if (configs[configPointer].components[compPointer].name == requirerCompName) {
+					for (int compPointer2 = 0; compPointer2 < configs[configPointer].components.arrayLength; compPointer2++) {
+						if (configs[configPointer].components[compPointer2].name == comp.name) {
+							if (intfSemantic != null) {
+								configs[configPointer].components[compPointer].iRequire = 
+									new Binding[](configs[configPointer].components[compPointer].iRequire, 
+									new Binding(compPointer2, new char[](intfAlias), new char[](intfSemantic)))
+								configs[configPointer].components[compPointer2].requiresMe = 
+									new Binding[](configs[configPointer].components[compPointer2].requiresMe, 
+									new Binding(compPointer, new char[](intfAlias), new char[](intfSemantic)))
+								configs[configPointer].listRelations = new String[](configs[configPointer].listRelations, 
+									new String(new char[]("$(iu.intToString(compPointer))",
+									":$(intfAlias)-$(intfSemantic):",
+									"$(iu.intToString(compPointer2))")))	
+							} else {
+								configs[configPointer].components[compPointer].iRequire = 
+									new Binding[](configs[configPointer].components[compPointer].iRequire, 
+									new Binding(compPointer2, new char[](intfAlias)))
+								configs[configPointer].components[compPointer2].requiresMe = 
+									new Binding[](configs[configPointer].components[compPointer2].requiresMe, 
+									new Binding(compPointer, new char[](intfAlias)))
+								configs[configPointer].listRelations = new String[](configs[configPointer].listRelations, 
+									new String(new char[]("$(iu.intToString(compPointer))",
+									":$(intfAlias):",
+									"$(iu.intToString(compPointer2))")))
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	// beware that the search is supposed to be in depth (if you imagine the tree-structure) i.e. take one component loads
+	// its first dependency connect to it, take the first dependency's dependecy and connect to the component dependency, 
+	// and do that before going back to the component and loading its next dependency
+	void loadingDependencies(Component comp, int configPointer) {
+		// in case the config was replicated we'll need to load components from a certain dependency point
+		// see loadUntilDone function description. therefore, we'll need to start from the last required interface that was loaded
+		// we load dependencies in sequence so the array length of iRequire when not complete loaded will point
+		// to the next interface that needs to be loaded. E.g. dependencies (A, B), we stopped after A, therefore
+		// iRequire will contain A and its size will be 1, so we'll pick this process up from 1 which points to the
+		// next interface in dependencies which is B :D
+		for (int depPointer = comp.iRequire.arrayLength; depPointer < comp.dependencies.arrayLength; depPointer++) {
+			String compVariants[] = null
+			if (comp.proxy) { compVariants = filterProxies(loadInterface(comp.dependencies[depPointer]).compVariants) }
+			else { compVariants = loadInterface(comp.dependencies[depPointer]).compVariants }
+			if (compVariants.arrayLength > 0) {
+				if (compVariants.arrayLength > 1) {
+					replicateConfigWithVariants(compVariants, comp.name, comp.dependencies[depPointer].alias,
+					 comp.dependencies[depPointer].semantic, configPointer)
+				}
+				addCompToConfig(compVariants[0].string, comp.name, comp.dependencies[depPointer].alias, 
+					comp.dependencies[depPointer].semantic, configPointer, true)
+			} else { throw new Exception("Components not found for: $(comp.dependencies[depPointer].package)") }
+		}
+	}
+
+	// removes proxies from the compVariant list
+	String[] filterProxies(String variants[]) {
+		String filteredVariants[] = null
+		for (int varPointer = 0; varPointer < variants.arrayLength; varPointer++) {
+			bool copy = true
+			for (int compPointer = 0; compPointer < compnts.arrayLength; compPointer++) {
+				if (variants[varPointer].string == compnts[compPointer].name) {
+					if (compnts[compPointer].proxy) { copy = false }
+				}
+			}
+			if (copy) { filteredVariants = new String[](filteredVariants, variants[varPointer]) }
+		}
+		return filteredVariants
+	}
+
+	// verify if interface is in the global list
+	// if not get it from disk and add interface to global list
+	Interface loadInterface(IntfName name) {
+		for (int pointer = 0; pointer < intfs.arrayLength; pointer++) {
+			//TODO: add semantic here as well
+			if ((intfs[pointer].name.alias == name.alias) && 
+				(intfs[pointer].name.package == name.package) &&
+				(intfs[pointer].name.semantic == name.semantic)) {
+				return intfs[pointer]
+			}
+		}
+		out.println("$(debugMSG) Searching components that provide $(name.package)...")
+		Interface intf = new Interface()
+		intf.name = new IntfName()
+		intf.name.alias = new char[](name.alias)
+		intf.name.package = new char[](name.package)
+		if (name.semantic != null) { 
+			intf.name.semantic = new char[](name.semantic)
+			intf.compVariants = clone search.getComponents(new char[](intf.name.package, 
+				":", intf.name.semantic))
+		} else { intf.compVariants = clone search.getComponents(intf.name.package) }
+		intfs = new Interface[](intfs, intf)
+		return intf
+	}
+
+	// first, verify whether or not comp is already in component global list before doing anything
+	// for optimisation reasons...
+	// this should read comp object file and load the name of the required interfaces to requiresList
+	Component loadComponent(char compName[]) {
+		// verifying if component is in the global component list
+		for (int compPointer = 0; compPointer < compnts.arrayLength; compPointer++) {
+			if (compName == compnts[compPointer].name) {
+				return compnts[compPointer]
+			}
+		}
+		Component comp = new Component()
+		comp.name = new char[](compName)
+		// reading object file infos
+		ObjectWriter reader = new ObjectWriter(comp.name)
+		InfoSection section = reader.getInfoSection("DNIL", "json")
+		JSONElement document = parser.parseDocument(section.content)
+		JSONElement requiredInterfaces = parser.getValue(document, "requiredInterfaces")
+		if (requiredInterfaces != null) {
+			for (int i = 0; i < requiredInterfaces.children.arrayLength; i++) {
+				JSONElement ri = requiredInterfaces.children[i]
+				char package[] = parser.getValue(ri, "package").value
+				char alias[] = parser.getValue(ri, "alias").value
+				if ((parser.getValue(ri, "native") != null) &&
+					(parser.getValue(ri, "native").value == "true")) {
+					comp.natIntfs = new NativeIntfs[](comp.natIntfs, new NativeIntfs(package, alias))
+				} else {
+					char semantic[] = null
+					JSONElement semanticEl = parser.getValue(ri, "semantic")
+					if (semanticEl != null) { semantic = semanticEl.value }
+					if (!isAutoBindings(package)) {
+						comp.dependencies = new IntfName[](comp.dependencies, new IntfName(package, alias, semantic))
+					}	
+				}
+			}
+		}
+		// the providedInterfaces are only necessary when adding new components to the list of configs
+		// it's not necessary when loading the initial set of components 
+		JSONElement providedInterfaces = parser.getValue(document, "providedInterfaces")
+		if (providedInterfaces != null) {
+			for (int i = 0; i < providedInterfaces.children.arrayLength; i++) {
+				JSONElement ri = providedInterfaces.children[i]
+				char package[] = parser.getValue(ri, "package").value
+				char alias[] = parser.getValue(ri, "alias").value
+				if (package == "remote.Remote") { comp.classB = true }
+				char semantic[] = null
+				JSONElement semanticEl = parser.getValue(ri, "semantic")
+				if (semanticEl != null) { semantic = semanticEl.value }
+				comp.iProvide = new IntfName[](comp.iProvide, new IntfName(package, alias, semantic))
+			}
+		}
+		section = reader.getInfoSection("PROX", "bool")
+		if (section != null) { comp.proxy = true }
+		else { comp.proxy = false }
+		compnts = new Component[](compnts, comp)
+		return comp
+	}
+
+	// the autoBindings give us a list of interfaces that do not need components to be loaded 
+	// -- the Dana VM does that for us
+	bool isAutoBindings(char interfacePckg[]) {
+		String autoBindings[] = system.getAutoBindings()
+		for (int bindingsCounter = 0; bindingsCounter < autoBindings.arrayLength; bindingsCounter++) {
+			if (interfacePckg == autoBindings[bindingsCounter].string) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// when inserting component in config, create a new Component object and copy the info from comp to the 
+	// component that will be inserted into the config. also, remember that we need to insert the component 
+	// name and how it relates to other components in the string
+	void insertComponentInConfig(store Component comp, char requirerCompName[], char intfAlias[], char intfSemantic[], int configPointer) {
+		// inserting object
+		Component c = new Component()
+		c.name = new char[](comp.name)
+		c.proxy = comp.proxy
+		//copying native libraries
+		for (int natPointer = 0; natPointer < comp.natIntfs.arrayLength; natPointer++) {
+			c.natIntfs = new NativeIntfs[](c.natIntfs, comp.natIntfs[natPointer])
+		}
+		// copying dependencies -- not sure if this needs to be copied like this for performance reasons!
+		for (int depPointer = 0; depPointer < comp.dependencies.arrayLength; depPointer++) {
+			c.dependencies = new IntfName[](c.dependencies, 
+				new IntfName(comp.dependencies[depPointer].package,
+					comp.dependencies[depPointer].alias,
+					comp.dependencies[depPointer].semantic))
+		}
+		// creating bindings
+		if (requirerCompName != null) {
+			for (int counter = 0 ; counter < configs[configPointer].components.arrayLength; counter++) {
+				if (configs[configPointer].components[counter].name == requirerCompName) {
+					// making the binding between iRequire = requiresMe component
+					if (intfSemantic != null) {
+						configs[configPointer].components[counter].iRequire = 
+							new Binding[](configs[configPointer].components[counter].iRequire,
+							new Binding(configs[configPointer].components.arrayLength, 
+								new char[](intfAlias), new char[](intfSemantic)))
+						c.requiresMe = new Binding[](c.requiresMe, 
+							new Binding(counter, new char[](intfAlias), 
+								new char[](intfSemantic)))
+					} else {
+						configs[configPointer].components[counter].iRequire = 
+							new Binding[](configs[configPointer].components[counter].iRequire,
+							new Binding(configs[configPointer].components.arrayLength, 
+								new char[](intfAlias), null))
+						c.requiresMe = new Binding[](c.requiresMe,
+							new Binding(counter,
+								new char[](intfAlias), null))
+					}
+					break
+				}
+			}
+			if (c.requiresMe != null) {
+				char relation[] = null
+				// inserting relation string
+				if (intfSemantic != null) {
+					relation = new char[]("$(iu.intToString(c.requiresMe[c.requiresMe.arrayLength-1].compPointer))",
+						":$(intfAlias)-$(intfSemantic):",
+						"$(iu.intToString(configs[configPointer].components.arrayLength))")
+				} else {
+					relation = new char[]("$(iu.intToString(c.requiresMe[c.requiresMe.arrayLength-1].compPointer))",
+						":$(intfAlias):",
+						"$(iu.intToString(configs[configPointer].components.arrayLength))")
+				}
+				configs[configPointer].listRelations = new String[](configs[configPointer].listRelations, new String(relation))	
+			} else { throw new Exception("Inconsistent state.") }
+		} else if (intfAlias != "App") { throw new Exception("Component not required by anyone.") }
+		// inserting created c object to configs components
+		configs[configPointer].components = new Component[](configs[configPointer].components, c)
+		// inserting component to string list (this is for the config description)
+		if (comp.classB) {
+			configs[configPointer].listCompNames = new String[](configs[configPointer].listCompNames, new String(new char[](comp.name, "[classB]")))
+		} else {
+			configs[configPointer].listCompNames = new String[](configs[configPointer].listCompNames, new String(comp.name))	
+		}
+		
+	}
+
+	bool isComponentInConfig(Component comp, int configPointer) {
+		if (configs.arrayLength > 0) {
+			for (int pointer = 0; pointer < configs[configPointer].components.arrayLength; pointer++) {
+				if (configs[configPointer].components[pointer].name == comp.name) {	return true }
+			}
+		}
+		return false
+	}
+
+	// copy the config from configPointer and add each comp (starting from second position -- 1, not 0)
+	// to the new config -- position 0 goes into the original config, not in the replicas we're creating here 
+	// (Future Roberto: but why? what does this comment even mean?)
+	void replicateConfigWithVariants(String compVariants[], char requirerCompName[], char intfAlias[], char intfSemantic[], int configPointer) {
+		for (int variant = 1; variant < compVariants.arrayLength; variant++) {
+			Config newConfig = new Config()
+			newConfig.description = new char[](configs[configPointer].description)
+			for (int counter = 0; counter < configs[configPointer].listCompNames.arrayLength; counter++) {
+				newConfig.listCompNames = new String[](newConfig.listCompNames, 
+					new String(new char[](configs[configPointer].listCompNames[counter].string)))
+			}
+			for (int counter = 0; counter < configs[configPointer].listRelations.arrayLength; counter++) {
+				newConfig.listRelations = new String[](newConfig.listRelations, 
+					new String(new char[](configs[configPointer].listRelations[counter].string)))
+			}
+			for (int counter = 0; counter < configs[configPointer].components.arrayLength; counter++) {
+				Component newC = new Component()
+				newC.name = new char[](configs[configPointer].components[counter].name)
+				newC.proxy = configs[configPointer].components[counter].proxy
+				for (int natPointer = 0;
+					natPointer < configs[configPointer].components[counter].natIntfs.arrayLength; 
+					natPointer++) {
+					newC.natIntfs = new NativeIntfs[](newC.natIntfs, 
+						configs[configPointer].components[counter].natIntfs[natPointer])
+				}
+				for (int counter2 = 0; counter2 < configs[configPointer].components[counter].dependencies.arrayLength; counter2++) {
+					if (configs[configPointer].components[counter].dependencies[counter2].semantic != null) {
+						newC.dependencies = new IntfName[](newC.dependencies, 
+							new IntfName(new char[](configs[configPointer].components[counter].dependencies[counter2].package),
+								new char[](configs[configPointer].components[counter].dependencies[counter2].alias),
+								new char[](configs[configPointer].components[counter].dependencies[counter2].semantic)))
+					} else {
+						newC.dependencies = new IntfName[](newC.dependencies, 
+							new IntfName(new char[](configs[configPointer].components[counter].dependencies[counter2].package),
+								new char[](configs[configPointer].components[counter].dependencies[counter2].alias), null))
+					}
+				}
+				for (int counter2 = 0; counter2 < configs[configPointer].components[counter].requiresMe.arrayLength; counter2++) {
+					if (configs[configPointer].components[counter].requiresMe[counter2].intfSemantic != null) {
+						newC.requiresMe = new Binding[](newC.requiresMe,
+							new Binding(configs[configPointer].components[counter].requiresMe[counter2].compPointer,
+								new char[](configs[configPointer].components[counter].requiresMe[counter2].intfAlias),
+								new char[](configs[configPointer].components[counter].requiresMe[counter2].intfSemantic)))
+					} else {
+						newC.requiresMe = new Binding[](newC.requiresMe,
+							new Binding(configs[configPointer].components[counter].requiresMe[counter2].compPointer,
+								new char[](configs[configPointer].components[counter].requiresMe[counter2].intfAlias), null))
+					}
+				}
+				for (int counter2 = 0; counter2 < configs[configPointer].components[counter].iRequire.arrayLength; counter2++) {
+					if (configs[configPointer].components[counter].iRequire[counter2].intfSemantic != null) {
+						newC.iRequire = new Binding[](newC.iRequire,
+							new Binding(configs[configPointer].components[counter].iRequire[counter2].compPointer,
+								new char[](configs[configPointer].components[counter].iRequire[counter2].intfAlias),
+								new char[](configs[configPointer].components[counter].iRequire[counter2].intfSemantic)))
+					} else {
+						newC.iRequire = new Binding[](newC.iRequire,
+							new Binding(configs[configPointer].components[counter].iRequire[counter2].compPointer,
+								new char[](configs[configPointer].components[counter].iRequire[counter2].intfAlias), null))
+					}
+				}
+				newConfig.components = new Component[](newConfig.components, newC)
+			}
+			configs = new Config[](configs, newConfig)
+			addCompToConfig(compVariants[variant].string, requirerCompName, intfAlias, intfSemantic, configs.arrayLength-1, false)
+		}
+	}
+
+	// creates interface App, add mainComp name to its list of compVariants
+	// add main interface to the global lists of interfaces and return main interface
+	Interface loadMainIntf(char mainComp[]) {
+		Interface main = new Interface()
+		main.name = new IntfName("App", "App", null)
+		main.compVariants = new String[](new String(mainComp))
+		intfs = new Interface[](intfs, main)
+		return main
+	}
+}

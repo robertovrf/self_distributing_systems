@@ -1,6 +1,4 @@
-uses App
-uses Service
-uses data.String
+const char debugMSG[]	  = "[@Distributor]"
 
 const char HELP[]      = "help"
 const char ALTERNATE[] = "alternate"
@@ -9,13 +7,12 @@ const char SHARDING[]  = "sharding"
 const char LOCAL[]     = "local"
 const char EXIT[]      = "exit"
 
-component provides App requires io.Output out, composition.RecursiveLoader rl,
-	data.StringUtil strUtil, data.IntUtil iu, io.Input in, composition.Adapter adapter {
+component provides App requires io.Output out, data.StringUtil strUtil, data.IntUtil iu, io.Input in, 
+	composition.Assembly assembly {
 
-	App app = null
-	LoadedComponents server = null
-	bool local = true
-	LoadedComponents proxy = null
+	String remoteConfigs[] 		= null
+	String localConfigs[] 		= null
+	String distributedProxies[] = null
 
 	void help() {
 		out.println("Command list:")
@@ -28,63 +25,18 @@ component provides App requires io.Output out, composition.RecursiveLoader rl,
 	}
 
 	void local() {
-		if (local) {
-			out.println("Already local")
-			return
-		}
-		// getting both server and list pointers
-		int pointerServer = 0
-		int pointerList = 0
-		for (int i = 0; i < server.loadedComponents.arrayLength; i++) {
-			if (strUtil.find(server.loadedComponents[i].path, "List.o")
-				!= StringUtil.NOT_FOUND) {
-				pointerList = i
-			}
-		}
-		for (int i = 0; i < server.loadedComponents.arrayLength; i++) {
-			if (strUtil.find(server.loadedComponents[i].path, "Server.o")
-				!= StringUtil.NOT_FOUND) {
-				pointerServer = i
-			}
-		}
-		if (pointerServer == 0) {
-			out.println("ERROR!")
-			return
-		}
-		// adapting
-		adapter.adaptRequiredInterface(
-			server.loadedComponents[pointerServer].class,
-			"data.adt.List",
-			server.loadedComponents[pointerList].class)
-		local = true
+		assembly.setConfig(localConfigs[0].string)
+		out.println("$(debugMSG) Local composition running.")
 	}
 
 	void distribute(char proxyInterface[]) {
-		if (!local) {
-			out.println("Already distributed!")
-			return
+		char remoteConfig[] = getRemoteConfig("data/adt/$(proxyInterface)")
+		if (remoteConfig != null) {	
+			assembly.setConfig(remoteConfig)
+			out.println("$(debugMSG) Remote composition [($proxyInterface)] running.")	
+		} else {
+			throw new Exception("Something went wrong! Couldn't find remote proxy.")
 		}
-		out.println("Distributing...")
-		// loading proxy
-		proxy = rl.load("data/adt/$(proxyInterface)")
-		// getting server pointer
-		int pointerServer = 0
-		for (int i = 0; i < server.loadedComponents.arrayLength; i++) {
-			if (strUtil.find(server.loadedComponents[i].path, "Server.o")
-				!= StringUtil.NOT_FOUND) {
-				pointerServer = i
-			}
-		}
-		if (pointerServer == 0) {
-			out.println("ERROR!")
-			return
-		}
-		// adapting
-		adapter.adaptRequiredInterface(
-			server.loadedComponents[pointerServer].class,
-			"data.adt.List",
-			proxy.mainComponent)
-		local = false
 	}
 
 	void commandInterpret(char cmd[]) {
@@ -92,36 +44,68 @@ component provides App requires io.Output out, composition.RecursiveLoader rl,
 		if (cmdList.arrayLength == 1) {
 			if (cmd == HELP) {
 				help()
-
 			} else if (cmd == PROPAGATE) {
 				distribute("ListCPPropagate.o")
-
 			} else if (cmd == ALTERNATE) {
 				distribute("ListCPAlternate.o")
-
 			} else if (cmd == SHARDING) {
 				distribute("ListCPSharding.o")
-
 			} else if (cmd == LOCAL) {
 				local()
-
 			} else {
 				out.println("Invalid command.")
 			}
 		}
 	}
 
-	void startApp(IDC main, AppParam params[]) {
-		app = new App() from main
-		if (main.hasProvides("Service")) {
-			main.callInterface(app, "Service", typeof(Service), Service.[start()], null)
+	char[] getRemoteConfig(char proxy[]) {
+		for (int pointer = 0; pointer < remoteConfigs.arrayLength; pointer++) {
+			if (strUtil.find(remoteConfigs[pointer].string, proxy) != StringUtil.NOT_FOUND) {
+				return remoteConfigs[pointer].string
+			}
 		}
-		app.main(params)
+		return null
+	}
+
+	// Guess there's a better way of doing this...
+	void remoteLocalSeparation() {
+		if ((remoteConfigs == null) || (localConfigs == null)) {
+			out.println("$(debugMSG) Separating local and remote compositions...")
+			String configs[] = assembly.getAllConfigs()
+			for (int confPointer = 0; confPointer < configs.arrayLength; confPointer++) {
+				bool remote = false
+				for (int distProxy = 0; distProxy < distributedProxies.arrayLength; distProxy++) {
+					if (strUtil.find(configs[confPointer].string, distributedProxies[distProxy].string) 
+						!= StringUtil.NOT_FOUND) {
+						remoteConfigs = new String[](remoteConfigs, configs[confPointer])
+						remote = true
+						break
+					}
+				}
+				if (!remote) {
+					localConfigs = new String[](localConfigs, configs[confPointer])
+				}
+			}
+		}
+	}
+
+	// TODO: dynamically load the names of distributed proxies from the folder distributor/data/adt/
+	// currently hard-coded 
+	void loadDistributedProxies() {
+		if (distributedProxies == null) {
+			distributedProxies = new String[](
+				new String("ListCPPropagate.o"),
+				new String("ListCPAlternate.o"),
+				new String("ListCPSharding.o"))
+		}
 	}
 
 	int App:main(AppParam params[]) {
-		server = rl.load("../server/main.o")
-		asynch::startApp(server.mainComponent, null)
+		/* Load target system */
+		assembly.setMain("../server/main.o", null)
+		loadDistributedProxies()
+		remoteLocalSeparation()
+		local()
 
 		/* command prompt */
 		char cmd[] = "start"
