@@ -28,34 +28,19 @@ Entre na pasta __server__ em um terminal e digite:
 
 $ dana main.o
 
-## Para executar o distribuidor:
-
-Abra três terminais na pasta _distributor_. No primeiro execute:
-
-$ dana -sp ../server Distributor.o
-
-Em um segundo terminal digite:
-
-$ dana RemoteList.o
-
-Em um terceiro terminal digite:
-
-$ dana RemoteList.o 2011
-
-A primeira composição do servidor que o Distribuidor monta é a versão local. Para distribuí-lo, digite distribute. Para tornar o servidor todo local novamente, digite local.
 
 ## Para executar o distribuidor (local e remote):
 
 Abra três terminais na pasta _distributor_. No primeiro execute:
 
-$ dana -sp ../server Distributor.o
+$ dana -sp "../server;../readn" Distributor.o
 
 Em um segundo terminal digite:
 
-$ dana -sp . RemoteDist.o
+$ dana -sp ../readn RemoteDist.o
 
 Em um terceiro terminal digite:
 
-$ dana -sp . RemoteDist.o 8082 2011
+$ dana -sp ../readn RemoteDist.o 8082 2011
 
-A primeira composição do servidor que o Distribuidor monta é a versão local. Para distribuí-lo, digite distribute. Para tornar o servidor todo local novamente, digite local.
+A primeira composição do servidor que o Distribuidor monta é a versão local. Para distribuí-lo, digite help e escolhar qual opção de distribuir. Para tornar o servidor todo local novamente, digite local.
