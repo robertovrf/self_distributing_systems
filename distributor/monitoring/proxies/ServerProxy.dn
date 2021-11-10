@@ -1,0 +1,46 @@
+
+
+component provides server.Server, monitoring.BeingMonitored requires io.Output out, 
+	server.Server server, monitoring.Container, monitoring.ResponseTime, data.StringUtil stringUtil, 
+	time.Timer, data.IntUtil iu {
+
+	static Container monitor
+
+	implementation BeingMonitored {
+		Event[] BeingMonitored:getEvents() {
+			if (monitor == null) { monitor = new Container() }
+			return monitor.getEvents()
+		}
+
+		Metric[] BeingMonitored:getMetrics() {
+			if (monitor == null) { monitor = new Container() }
+			return monitor.getMetrics()
+		}
+	
+		void BeingMonitored:turnMonitorOn() {
+			if (monitor == null) { monitor = new Container() }
+			monitor.turnMonitorOn()
+		}
+
+		void BeingMonitored:turnMonitorOff() {
+			if (monitor == null) { monitor = new Container() }
+			monitor.turnMonitorOff()
+		}
+	}
+
+	implementation Server {
+		void Server:process(HTTPMessage msg) {
+			if (monitor == null) {
+				monitor = new Container()
+				monitor.turnMonitorOn()
+			}
+			ResponseTime metric = new ResponseTime()
+			metric.start()
+			server.process(msg)
+			metric.finish()
+			int result = metric.result()
+			monitor.addMetric("response_time", result, false)
+			monitor.addEvent(msg.command, 1)
+		}
+	}
+}

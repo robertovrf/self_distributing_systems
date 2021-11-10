@@ -1,0 +1,26 @@
+uses composition.Assembly
+uses monitoring.BeingMonitored
+
+data PerceptionData {
+	Metric metrics[]
+	Event events[]
+}
+
+interface Perception {
+	/* Assembly functions */
+	String[] getAllConfigs()
+	char[] getConfig()
+	void setMain(char path[], AppParam args[])
+	void setConfig(char config[])
+	void removeComp(String compPaths[])
+	void addComp(String compPaths[])
+	IDCReference[] getComponents(String paths[])
+	IDCReference[] getCompsByProvidedInterface(char providedIntf[])
+
+	/* Perception functions */
+	Perception(bool verbose)
+	char[] getPerceptionData()//return json
+	void addProxy(char exp[])
+	void removeProxy(char proxyExp[])
+	String[] getProxies()
+}

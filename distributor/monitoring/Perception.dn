@@ -1,0 +1,615 @@
+// Perception module
+//
+// This version:
+// 1. allows component monitoring through proxy;
+// 2. supports proxy management (addition and removal of proxy);
+// 3. applies proxy to configs using proxy expression language (PEL);
+// 
+// Author: Roberto Rodrigues Filho
+// February @ 2017
+
+uses time.DateTime
+
+data MapP {
+	char config[] // clean config
+	char configCompressed[]
+	char proxyConfig[] // proxy config
+	bool current // if its current or not
+}
+
+data Rule {
+	String paths[] // proxy paths
+	char exp[] // rule expression
+	MapP configs[]
+}
+
+const char debugMSG[] = "[@Perception]"
+const bool PROXY = true
+
+// TODO: revisit the variable's name -- it's getting confusing...
+component provides monitoring.Perception requires io.Output out, data.IntUtil iu, composition.Assembly assembly, composition.ObjectWriter,
+	data.StringUtil strUtil, monitoring.ResponseTime responseTime, util.DescriptionHandler dh, data.json.JSONEncoder encoder {
+	
+	Rule rule // active proxy rule -- one proxy rule at a time (for now and for simplicity -- maybe that's the right move here)
+	String cleanConfigs[] // configs with no proxies
+	String availableProxies[]
+	Mutex perceptionLock = new Mutex()
+
+	Perception:Perception(bool verbose) {
+		if (verbose) { out.println("$(debugMSG) Proxy set up procedure started!") }
+		// TODO: generate proxy code 
+		if (verbose) { /*out.println("$(debugMSG) 1. Proxy code generation...")*/ }
+		availableProxies = new String[](availableProxies, new String("../distributor/monitoring/proxies/ServerProxy.o"))
+		if (verbose) { /*out.println("$(debugMSG) -> Proxy code generation done.")*/ }
+		// TODO: compile proxy code 
+		if (verbose) { /*out.println("$(debugMSG) 2. Proxy compilation...")*/ }
+		if (verbose) { /*out.println("$(debugMSG) -> Proxy compilation done.")*/ }
+		// annotate all proxy
+		if (verbose) { /*out.println("$(debugMSG) 3. Proxy annotation...")*/ }
+		for (int pointer = 0; pointer < availableProxies.arrayLength; pointer++) {
+			ObjectWriter objWriter = new ObjectWriter(availableProxies[pointer].string)
+			if (objWriter.getInfoSection("PROX", "bool") == null) { 
+				objWriter.addInfoSection(new InfoSection("PROX", "bool", "true"))
+			}
+		}
+		if (verbose) { /*out.println("$(debugMSG) -> Proxy annotation done.")*/ }
+		rule = null
+		cleanConfigs = null
+		if (verbose) { out.println("$(debugMSG) Proxy set up successfully finished.") }
+	}
+
+	void Perception:setMain(char path[], AppParam args[]) {
+		assembly.setMain(path, args)
+		cleanConfigs = assembly.getAllConfigs()
+		/*out.println("$(debugMSG) Adding proxy to configs.")
+		if (availableProxies.arrayLength > 0) { assembly.addComp(availableProxies) }*/
+		out.println("$(debugMSG) Perception fully configured.")
+	}
+
+	IDCReference[] Perception:getComponents(String paths[]) {
+		return assembly.getComponents(paths)
+	}
+
+	IDCReference[] Perception:getCompsByProvidedInterface(char providedIntf[]) {
+		return assembly.getCompsByProvidedInterface(providedIntf)
+	}
+
+	String[] Perception:getAllConfigs() {
+		return cleanConfigs
+	}
+
+	char[] Perception:getConfig() {
+		if (rule != null) {
+			for (int configPointer = 0; configPointer < rule.configs.arrayLength; configPointer++) {
+				if (rule.configs[configPointer].current) { return rule.configs[configPointer].configCompressed }
+			}
+		}
+		return assembly.getConfig()
+	}
+
+	void Perception:setConfig(char config[]) {
+		mutex(perceptionLock) {
+			if (rule == null) {	assembly.setConfig(config) }
+			else {
+				int configPointer = 0
+				if ((configPointer = reducedVerifier(config)) != INT_MAX) {
+					if (assembly.setConfig(rule.configs[configPointer].proxyConfig)) {
+						// clean Proxy data ensures that the data in proxy is the data immediately gathered 
+						// after setConfig() function was called
+						cleanProxyData()
+						// updating current config
+						setCurrentProxyConfigToFalse()
+						rule.configs[configPointer].current = true
+						rule.configs[configPointer].configCompressed = config	
+					} else { 
+						out.println("$(debugMSG) Something went wrong, adaptation was not completed.")
+						return
+					}
+				} else {
+					//out.println("$(debugMSG) config $(config)")
+					if (assembly.setConfig(config)) { setCurrentProxyConfigToFalse() }
+					else {
+						out.println("$(debugMSG) Something went wrong, adaptation was not completed.")
+						return
+					}
+				}
+			}
+			out.println("$(debugMSG) Config filtered and changed successfully.")	
+		}
+	}
+
+	void Perception:removeComp(String compPaths[]) {
+		// do not allow users to remove proxy components
+		String filteredCompPaths[] = filterProxy(compPaths, availableProxies, !PROXY)
+		if (filteredCompPaths.arrayLength > 0) {
+			assembly.removeComp(filteredCompPaths)
+			if (rule == null) {
+				cleanConfigs = assembly.getAllConfigs()
+			} else {
+				String allConfs[] = assembly.getAllConfigs()
+				String proxyConfigs[] = getConfigsFromRule(PROXY)
+				cleanConfigs = null
+				MapP newConfigs[] = null
+				int mapPointer = 0
+				for (int configPointer = 0; configPointer < allConfs.arrayLength; configPointer++) {
+					// update clean & proxy configs
+					if (!isAnyProxyInConfig(allConfs[configPointer].string, rule.paths)) {
+						cleanConfigs = new String[](cleanConfigs, allConfs[configPointer])
+					} else {
+						if ((mapPointer = isStringinList(allConfs[configPointer].string, proxyConfigs)) != INT_MAX) {
+							newConfigs = new MapP[](newConfigs, 
+									new MapP(new char[](rule.configs[mapPointer].config),
+									"",
+									new char[](rule.configs[mapPointer].proxyConfig),
+									rule.configs[mapPointer].current))
+						}
+					}
+				}
+				rule.configs = newConfigs
+				out.println("$(debugMSG) Proxy configs updated successfully.")
+				printRule()
+			}
+		}
+	}
+
+	void Perception:addComp(String compPaths[]) {
+		// do not allow users to add proxy components
+		String filteredCompPaths[] = filterProxy(compPaths, availableProxies, !PROXY)
+		if (filteredCompPaths.arrayLength > 0) {
+			assembly.addComp(compPaths)
+			String allConfs[] = assembly.getAllConfigs()
+			cleanConfigs = filterConfigProxy(allConfs, availableProxies, !PROXY)
+			if (rule != null) {
+				rule.configs = match(filterConfigProxy(allConfs, rule.paths, PROXY))
+				out.println("$(debugMSG) Proxy configs updated successfully.")
+				//printRule()
+			}
+		}
+	}
+
+	void Perception:addProxy(char exp[]) {
+		if (rule == null) {
+			String proxyPaths[] = strUtil.explode(strUtil.explode(exp, "|")[0].string, ",")
+			rule = new Rule()
+			rule.paths = filterProxy(proxyPaths, availableProxies, PROXY)
+			out.println("$(debugMSG) Adding proxy to configs.")
+			assembly.addComp(rule.paths)
+			rule.exp = dh.decompress(exp)
+			rule.configs = match(filterConfigProxy(assembly.getAllConfigs(), rule.paths, PROXY))
+			setConfig(assembly.getConfig()) // applies recently added proxy to the current config
+			out.println("$(debugMSG) Proxy successfully added.")
+			/* printRule() printAllConfigs() */
+		} else { out.println("$(debugMSG) The system has already had a proxy rule defined. Please remove the existing rule before adding a new one.") }
+	}
+
+	void Perception:removeProxy(char proxyExp[]) {
+		if (rule != null) {
+			// the proxyPaths need to match the rule.paths...
+			String proxyPaths[] = strUtil.explode(strUtil.explode(proxyExp, "|")[0].string, ",")
+			String filterPaths[] = filterProxy(proxyPaths, rule.paths, PROXY)
+			if (filterPaths.arrayLength == rule.paths.arrayLength) {
+				assembly.setConfig(getConfig()) // this should work
+				removeComp(rule.paths)
+				rule = null
+			} else { 
+				out.println("$(debugMSG) Proxy expression not found!")
+				return
+			}
+		}
+		//printRule()
+		out.println("$(debugMSG) Proxy successfully removed.")
+	}
+
+	// following json formatting
+	char[] Perception:getPerceptionData() {
+		mutex(perceptionLock) {
+			IDCReference components[] = assembly.getComponents(availableProxies)
+			/* turn proxy off */
+			for (int compPointer = 0; compPointer < components.arrayLength; compPointer++) {
+				if (components[compPointer].class.hasProvides("monitoring.BeingMonitored")) {
+					BeingMonitored metricMonitor = new BeingMonitored() from components[compPointer].class
+					metricMonitor.turnMonitorOff()
+				}
+			}
+			/* collect data ... */
+			PerceptionData pD[] = null
+			for (int compPointer = 0; compPointer < components.arrayLength; compPointer++) {
+				if (components[compPointer].class.hasProvides("monitoring.BeingMonitored") != null) {
+					PerceptionData perceptionD = new PerceptionData()
+					BeingMonitored beingMonitored = new BeingMonitored() from components[compPointer].class
+					char componentName[] 	= components[compPointer].path
+					// this is important! in case you store a list of perception data, you won't know 
+					// in the future from what arch the data is
+					char currentConfig[] 	= getConfig()
+					Metric metrics[] 		= beingMonitored.getMetrics()
+					Event events[] 			= beingMonitored.getEvents()
+					perceptionD.metrics = metrics
+					perceptionD.events = events
+					pD = new PerceptionData[](pD, perceptionD)
+				}
+			}
+			/* turn proxy back on */
+			for (int compPointer = 0; compPointer < components.arrayLength; compPointer++) {
+				if (components[compPointer].class.hasProvides("monitoring.BeingMonitored")) {
+					BeingMonitored metricMonitor = new BeingMonitored() from components[compPointer].class
+					metricMonitor.turnMonitorOn()
+				}
+			}
+			if (pD == null) { return null }
+			return encoder.jsonFromArray(pD, null)
+
+		}
+	}
+
+	String[] Perception:getProxies() {
+		return availableProxies
+	}
+
+	MapP[] match(String proxyConfigs[]) {
+		MapP newConfig[] = null
+		responseTime.start()
+		for (int proxyPointer = 0; proxyPointer < proxyConfigs.arrayLength; proxyPointer++) {
+			out.print("\r$(debugMSG) Adding proxy $(iu.intToString((proxyPointer*100)/proxyConfigs.arrayLength))% done.")
+			char decompConfig[] = dh.decompress(proxyConfigs[proxyPointer].string)
+			char reducedConfig[] = null
+			if ((reducedConfig = matchExp(decompConfig, rule.exp)) != null) {
+				newConfig = new MapP[](newConfig, 
+								new MapP(reducedConfig,
+								"",
+								proxyConfigs[proxyPointer].string,
+								false))
+			}
+		}
+		out.print("\r$(debugMSG) Adding proxy 100% done.")
+		responseTime.finish()
+		out.println("\n$(debugMSG) Time: $(iu.intToString(responseTime.result())) ms")
+		return newConfig
+	}
+
+	// verify if exp matches the config expecting decompressed config and exp 
+	// if it does, return reducedConfig, otherwise return null
+	char[] matchExp(char config[], char exp[]) {
+		String xOrExp[] = strUtil.explode(exp, ";")
+		char reducedConfig[] = null
+		int xOrTrue = 0
+		for (int xOrPointer = 0; xOrPointer < xOrExp.arrayLength; xOrPointer++) {
+			String andExp[] = strUtil.explode(xOrExp[xOrPointer].string, "&")
+			char rCHelper[] = config 
+			for (int andPointer = 0; andPointer < andExp.arrayLength; andPointer++) {
+				String bindHelper[] = strUtil.explode(andExp[andPointer].string, "(")
+				int matchTimes = 0
+				if (strUtil.isNumeric(bindHelper[0].string)) { matchTimes = iu.intFromString(bindHelper[0].string) }
+				else { matchTimes = INT_MAX }
+				char pattern[] = decomposeProxyBind(strUtil.explode(bindHelper[1].string, ")")[0].string)
+				if ((rCHelper = patternMatching(rCHelper, pattern, matchTimes)) == null) { break }
+			}
+			if ((rCHelper != null) && (rCHelper != config)) {
+				reducedConfig = new char[](rCHelper)
+				xOrTrue++
+			}
+		}
+		if (xOrTrue == 1) { return reducedConfig }
+		return null
+	}
+
+	// matchTimes: number of times the token has to appear in str
+	// 1 -- the first time I see the interface, the proxy needs to be there
+	// 2 -- the first and second time I see the interface, the proxy has to be there
+	// * -- every instance of the interface, the proxy must be there
+	// pattern: has a very unique format -- see decomposeProxyBind function
+	// the return string has to have a accumulative effect...
+	char[] patternMatching(char str[], char pattern[], int matchTimes) {
+		String result[] = null
+		String strBindingList[] = strUtil.explode(str, ",")
+		String helper[] = strUtil.explode(pattern, "|")
+		char intf[] = new char[](":", helper[0].string, ":")
+		char comp1[] = helper[1].string
+		char comp2[] = helper[2].string
+		if (comp1 == "*") { comp1 = "" }
+		if (comp2 == "*") { comp2 = "" }
+		char proxy[] = helper[3].string
+		String previousStrList[] = strUtil.explode(helper[4].string, ",")
+		int matchCounter = 0
+		int index = isSubStrInList(intf, strBindingList)
+		while ((index != INT_MAX) && (matchCounter < matchTimes)) {
+			if (index != INT_MAX) {
+				// previous string matching...
+				if (previousStrList[0].string != "null") {
+					if (!matchPreviousStrList(previousStrList, strBindingList, index)) { return null }
+					else {
+						// the previous string matched! now copy previous string to result and remove it from strBindingList  
+						int previousStrCounter = previousStrList.arrayLength
+						int strCounter = index-1
+						while ((previousStrCounter != INT_MAX) && (strCounter != INT_MAX)) {
+							result = new String[](result, new String(strBindingList[strCounter].string))
+							strBindingList = removeFromStrList(strBindingList, strCounter)
+							previousStrCounter--
+							strCounter--
+							index--
+						}
+					}
+				}
+				// the interface matching -- in case we have proxy in exp or not
+				if (proxy == "null") {
+					if ((new char[](comp1, intf, comp2)) != strBindingList[index].string) { return null }
+					else {
+						// bind matched! remove it from strBindingList and add it to result
+						result = new String[](result, new String(strBindingList[index].string))
+						strBindingList = removeFromStrList(strBindingList, index)
+					}
+				} else {
+					if (strUtil.find(strBindingList[index].string, new char[](comp1, intf, proxy)) != StringUtil.NOT_FOUND) {
+						int index2 = isSubStrInList(new char[](proxy, intf, comp2), strBindingList)
+						if (index2 == INT_MAX) { return null }
+						else {
+							// this is to avoid having ":HTTPHandler:" in the reducedConfig
+							char comp1Name[] = ""
+							char comp2Name[] = ""
+							if ((comp1 == "") || (comp2 == "")) {
+								String compHelper[] = null
+								if (comp1 == "") {
+									compHelper = strUtil.explode(strBindingList[index].string, ":")
+									comp1Name = compHelper[0].string 
+								} else { comp1Name = comp1 }
+								if (comp2 == "") {
+									compHelper = strUtil.explode(strBindingList[index2].string, ":")
+									comp2Name = compHelper[2].string
+								} else { comp2Name = comp2 }
+							}
+							result = new String[](result, new String(new char[](comp1Name, intf, comp2Name)))
+							strBindingList = removeFromStrList(strBindingList, index)
+							strBindingList = removeFromStrList(strBindingList, index2-1) // after removing all items move one position down
+						}
+					} else { return null }
+				}
+			} else { return null }
+			matchCounter++
+			index = isSubStrInList(intf, strBindingList)
+		}
+		if ((matchTimes != INT_MAX) && (matchCounter != matchTimes)) { return null }
+		if (matchCounter == 0) { return null }	// this means the intf wasn't found in config
+		// add the remainder of items in strBindingList to result (the reduced proxy config)
+		for (int pointer = 0; pointer < strBindingList.arrayLength; pointer++) {
+			result = new String[](result, new String(strBindingList[pointer].string))	
+		}
+		return strUtil.implode(removeProxyFromStringList(result, proxy), ",")
+	}
+
+	// we need to remove all proxy bindings and all subsequent bindings that were generated because of the proxy
+	String[] removeProxyFromStringList(String list[], char proxy[]) {
+		String result[] = null
+		String proxyBindings[] = null
+		if (proxy != "null") {
+			// first filter -- removes proxies
+			for (int pointer = 0; pointer < list.arrayLength; pointer++) {
+				if (strUtil.find(list[pointer].string, proxy) == StringUtil.NOT_FOUND) {
+					result = new String[](result, new String(list[pointer].string))	
+				} else { proxyBindings = new String[](proxyBindings, new String(list[pointer].string)) }
+			}
+			// second filter -- removes subsequent bindings
+			if (proxyBindings.arrayLength > 0) {
+				for (int pointer = 0; pointer < proxyBindings.arrayLength; pointer++) {
+					if (strUtil.find(proxyBindings[pointer].string, new char[](proxy,":")) != StringUtil.NOT_FOUND) {
+						char comp[] = strUtil.explode(proxyBindings[pointer].string, ":")[2].string
+						// if there isn't any other component that requires comp, remove all instances of comp from result
+						if (isSubStrInList(new char[](":", comp), result) == INT_MAX) {
+							int index = INT_MAX
+							while ((index = isSubStrInList(new char[](comp), result)) != INT_MAX) {
+								result = removeFromStrList(result, index)
+							}
+						}
+					}
+				}
+			}
+		}
+		return result
+	}
+
+	bool matchPreviousStrList(String previousStrList[], String stringList[], int index) {
+		if (previousStrList.arrayLength <= index) {
+			int previousIndex = previousStrList.arrayLength-1
+			int strIndex = index-1
+			while ((previousIndex != INT_MAX) && (strIndex != INT_MAX)) {
+				if (previousStrList[previousIndex].string != stringList[strIndex].string) {
+					return false
+				}
+				strIndex--
+				previousIndex--
+			}
+			return true
+		}
+		return false
+	}
+
+	// binding: WS:RequestHandler[Proxy.o]:* (remove parentheses and numbers)
+	// what if: WS:TCP:TCP,WS:TCPSocket:TCP,WS:RequestHandler:RequestHandler,RequestHandler:HTTPHandler[P]:*
+	char[] decomposeProxyBind(char binding[]) {
+		String helper[] = strUtil.explode(binding, ",")
+		char previousStr[]
+		if (helper.arrayLength > 1) { previousStr = strUtil.implode(removeFromStrList(helper, helper.arrayLength-1), ",") }
+		else { previousStr = "null" }
+		helper = strUtil.explode(helper[helper.arrayLength-1].string, ":") // proxy will be in the last one
+		char comp1[] = helper[0].string
+		char comp2[] = helper[2].string
+		char intf[] = helper[1].string // interface + proxy
+		helper = strUtil.explode(intf, "[")
+		char proxy[] = "null"
+		if (helper.arrayLength > 1) {
+			intf = helper[0].string
+			proxy = strUtil.explode(helper[1].string, "]")[0].string	
+		}
+		return new char[]("|", intf, "|", comp1, "|", comp2, "|", proxy, "|", previousStr , "|")
+	}
+
+	int isSubStrInList(char subStr[], String list[]) {
+		for (int pointer = 0; pointer < list.arrayLength; pointer++) {
+			if (strUtil.find(list[pointer].string, subStr) != StringUtil.NOT_FOUND) {
+				return pointer
+			}
+		}
+		return INT_MAX
+	}
+
+	String[] removeFromStrList(String list[], int index) {
+		String result[] = null
+		for (int pointer = 0; pointer < list.arrayLength; pointer++) {
+			if (pointer != index) { result = new String[](result, new String(list[pointer].string)) }
+		}
+		return result
+	}
+
+	int isStringinList(char string[], String list[]) {
+		for (int pointer = 0; pointer < list.arrayLength; pointer++) {
+			if (string == list[pointer].string) { return pointer }
+		}
+		return INT_MAX
+	}
+
+	String[] getConfigsFromRule(bool proxy) {
+		String configs[] = null
+		if (rule != null) {
+			for (int pointer = 0; pointer < rule.configs.arrayLength; pointer++) {
+				if (proxy) { configs = new String[](configs, new String(rule.configs[pointer].proxyConfig)) }
+				else { configs = new String[](configs, new String(rule.configs[pointer].config)) }
+			}	
+		}
+		return configs
+	}
+
+	// verify if there is a proxy component in a specific config
+	bool isAnyProxyInConfig(char config[], String proxyPaths[]) {
+		String comps[] = getCompsName(config)
+		if (rule != null) {
+			for (int proxyPointer = 0; proxyPointer < proxyPaths.arrayLength; proxyPointer++) {
+				if (isStringinList(proxyPaths[proxyPointer].string, comps) != INT_MAX) { return true }
+			}
+		}
+		return false
+	}
+
+	String[] getCompsName(char config[]) {
+		String result[] = strUtil.explode(config, "|")
+		result = strUtil.explode(result[0].string, ",")
+		return result
+	}
+
+	String[] filterConfigProxy(String configs[], String proxyList[], bool onlyWithProxy) {
+		String result[] = null
+		for (int configPointer = 0; configPointer < configs.arrayLength; configPointer++) {
+			if (onlyWithProxy) {
+				if (isAnyProxyInConfig(configs[configPointer].string, proxyList)) {
+					result = new String[](result, new String(configs[configPointer].string))
+				}	
+			} else {
+				if (!isAnyProxyInConfig(configs[configPointer].string, proxyList)) {
+					result = new String[](result, new String(configs[configPointer].string))
+				}
+			}
+		}
+		return result
+	}
+
+	// returns a list of compPaths without any or only with proxy of proxyList 
+	String[] filterProxy(String compPaths[], String proxyList[], bool onlyWithProxy) {
+		String result[] = null
+		for (int compPointer = 0; compPointer < compPaths.arrayLength; compPointer++) {
+			if (onlyWithProxy) {
+				if (isStringinList(compPaths[compPointer].string, proxyList) != INT_MAX) { 
+					result = new String[](result, new String(compPaths[compPointer].string))
+				}
+			} else {
+				if (isStringinList(compPaths[compPointer].string, proxyList) == INT_MAX) { 
+					result = new String[](result, new String(compPaths[compPointer].string))
+				}
+			}
+		}
+		return result
+	}
+
+	// in case current config is a proxy config
+	void setCurrentProxyConfigToFalse() {
+		for (int pointer = 0; pointer < rule.configs.arrayLength; pointer++) {
+			if (rule.configs[pointer].current) {
+				rule.configs[pointer].current = false
+			}
+		}
+	}
+
+	int reducedVerifier(char config[]) {
+		char cleanConf[] = dh.decompress(config)
+		String cleanBindingList[] = strUtil.explode(cleanConf, ",")
+		for (int pointer = 0; pointer < rule.configs.arrayLength; pointer++) {
+			String reducedBindingList[] = strUtil.explode(rule.configs[pointer].config, ",")
+			if (cleanBindingList.arrayLength == reducedBindingList.arrayLength) {
+				bool match = true
+				for (int bindPointer = 0; bindPointer < reducedBindingList.arrayLength; bindPointer++) {
+					if (isStringinList(reducedBindingList[bindPointer].string, cleanBindingList) == INT_MAX) {
+						match = false
+						break
+					}
+				}
+				if (match) { return pointer }
+			}
+		}
+		return INT_MAX
+	}
+
+	// TODO: there is repeated code in here taken from getPerceptionData() ... polish it up
+	void cleanProxyData() {
+		IDCReference components[] = assembly.getComponents(availableProxies)
+		/* turn proxy off */
+		for (int compPointer = 0; compPointer < components.arrayLength; compPointer++) {
+			if (components[compPointer].class.hasProvides("monitoring.BeingMonitored")) {
+				BeingMonitored metricMonitor = new BeingMonitored() from components[compPointer].class
+				metricMonitor.turnMonitorOff()
+			}
+		}
+		/* clean data */
+		for (int compPointer = 0; compPointer < components.arrayLength; compPointer++) {
+			if (components[compPointer].class.hasProvides("monitoring.BeingMonitored")) {
+				BeingMonitored beingMonitored = new BeingMonitored() from components[compPointer].class
+				beingMonitored.getMetrics()
+				beingMonitored.getEvents()
+			}
+		}
+		/* turn proxy back on */
+		for (int compPointer = 0; compPointer < components.arrayLength; compPointer++) {
+			if (components[compPointer].class.hasProvides("monitoring.BeingMonitored")) {
+				BeingMonitored metricMonitor = new BeingMonitored() from components[compPointer].class
+				metricMonitor.turnMonitorOn()
+			}
+		}
+	}
+
+	// TODO: THIS IS FOR DEBUGGING REASONS!
+	void printAllConfigs() {
+		String allConfigs[] = assembly.getAllConfigs()
+		out.println("$(debugMSG) ---- ALL CONFIGS ----")
+		for (int pointer = 0; pointer < allConfigs.arrayLength; pointer++) {
+			//out.println("$(debugMSG) $(iu.intToString(pointer+1)). $(dh.decompress(allConfigs[pointer].string))")
+			out.println("$(debugMSG) $(iu.intToString(pointer+1)). $(allConfigs[pointer].string)")
+		}
+		out.println("$(debugMSG) ---- END OF ALL CONFIGS ----")
+	}
+
+	// TODO: THIS IS FOR DEBUGGING REASONS!
+	void printRule() {
+		if (rule != null) {
+			out.println("$(debugMSG) ---- RULE INFO ----")
+			out.println("$(debugMSG) Proxies:")
+			for (int pointer = 0; pointer < rule.paths.arrayLength; pointer++) {
+				out.println("$(debugMSG) $(rule.paths[pointer].string)")
+			}
+			out.println("$(debugMSG) Exp: $(rule.exp)")
+			out.println("$(debugMSG) Configs:")
+			for (int pointer = 0; pointer < rule.configs.arrayLength; pointer++) {
+				out.println("$(debugMSG) $(iu.intToString(pointer+1)).")
+				out.println("$(debugMSG) --- proxy: $(rule.configs[pointer].proxyConfig)")
+				out.println("$(debugMSG) --- clean: $(rule.configs[pointer].config)")
+				if (rule.configs[pointer].current) { out.println("$(debugMSG) --- current: yes") }
+				else { out.println("$(debugMSG) --- current: no") }	
+			}
+			out.println("$(debugMSG) ---- END OF RULE INFO ---- ")
+		} else { out.println("$(debugMSG) No proxies added!")}
+ 	}
+}

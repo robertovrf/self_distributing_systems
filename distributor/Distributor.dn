@@ -1,18 +1,21 @@
 const char debugMSG[]	  = "[@Distributor]"
 
-const char HELP[]      = "help"
-const char ALTERNATE[] = "alternate"
-const char PROPAGATE[] = "propagate"
-const char SHARDING[]  = "sharding"
-const char LOCAL[]     = "local"
-const char EXIT[]      = "exit"
+const char HELP[]       = "help"
+const char ALTERNATE[]  = "alternate"
+const char PROPAGATE[]  = "propagate"
+const char SHARDING[]   = "sharding"
+const char LOCAL[]      = "local"
+const char PERCEPTION[] = "perception"
+const char TEST[]		= "test"
+const char EXIT[]       = "exit"
 
 component provides App requires io.Output out, data.StringUtil strUtil, data.IntUtil iu, io.Input in, 
-	composition.Assembly assembly {
+	monitoring.Perception, data.json.JSONEncoder encoder, data.DecUtil du, time.Timer t {
 
 	String remoteConfigs[] 		= null
 	String localConfigs[] 		= null
 	String distributedProxies[] = null
+	Perception perception 		= null
 
 	void help() {
 		out.println("Command list:")
@@ -21,21 +24,58 @@ component provides App requires io.Output out, data.StringUtil strUtil, data.Int
 		out.println(" $(PROPAGATE) - to distribute list propagating write requests to all replicas")
 		out.println(" $(SHARDING) - to distribute list with sharding")
 		out.println(" $(LOCAL) - to bring list locally")
+		out.println(" $(PERCEPTION) - to get perception data from the current running composition")
 		out.println(" $(EXIT) - to finish execution")
 	}
 
 	void local() {
-		assembly.setConfig(localConfigs[0].string)
+		perception.setConfig(localConfigs[0].string)
 		out.println("$(debugMSG) Local composition running.")
 	}
 
 	void distribute(char proxyInterface[]) {
 		char remoteConfig[] = getRemoteConfig("data/adt/$(proxyInterface)")
 		if (remoteConfig != null) {	
-			assembly.setConfig(remoteConfig)
+			perception.setConfig(remoteConfig)
 			out.println("$(debugMSG) Remote composition [($proxyInterface)] running.")	
 		} else {
 			throw new Exception("Something went wrong! Couldn't find remote proxy.")
+		}
+	}
+
+	void perception() {
+		//char jsonPD[] = perception.getPerceptionData()
+		//out.println("$(debugMSG) $(jsonPD)")
+		PerceptionData pD[] = encoder.jsonToArray(perception.getPerceptionData(), typeof(PerceptionData[]), null)
+		for (int i = 0; i < pD.arrayLength; i++) {
+			for (int cMetrics = 0; cMetrics < pD[i].metrics.arrayLength; cMetrics++) {
+				dec value = pD[i].metrics[cMetrics].value
+				dec counter = pD[i].metrics[cMetrics].counter
+				dec avgRT = value/counter
+				out.println("$(debugMSG) Avg response time: $(du.decToString(avgRT))")
+			}
+			for (int cEvents = 0; cEvents < pD[i].events.arrayLength; cEvents++) {
+				out.println("$(debugMSG) Request type: $(pD[i].events[cEvents].type) - $(pD[i].events[cEvents].counter) ")
+			}
+		}
+	}
+
+	dec getAvgResponseTime() {
+		PerceptionData pD[] = encoder.jsonToArray(perception.getPerceptionData(), typeof(PerceptionData[]), null)
+		dec result = 0.0
+		if ((pD != null) && (pD[0].metrics.arrayLength > 0)) {
+			dec value = pD[0].metrics[0].value
+			dec counter = pD[0].metrics[0].value
+			result = value/counter
+		}
+		return result
+	}
+
+	void observationLoop(int numCycles, int observationWindow) {
+		getAvgResponseTime()
+		for (int i = 0; i < numCycles; i++) {
+			t.sleep(observationWindow)
+			out.println("$(debugMSG) $(du.decToString(getAvgResponseTime()))")
 		}
 	}
 
@@ -52,6 +92,19 @@ component provides App requires io.Output out, data.StringUtil strUtil, data.Int
 				distribute("ListCPSharding.o")
 			} else if (cmd == LOCAL) {
 				local()
+			} else if (cmd == PERCEPTION) {
+				perception()
+			} else if (cmd == TEST) {
+				out.println("$(debugMSG) Starting test...")
+				local()
+				observationLoop(10, 1000)
+				distribute("ListCPPropagate.o")
+				observationLoop(10, 1000)
+				distribute("ListCPAlternate.o")
+				observationLoop(10, 1000)
+				distribute("ListCPSharding.o")
+				observationLoop(10, 1000)
+				out.println("$(debugMSG) Test finished!")
 			} else {
 				out.println("Invalid command.")
 			}
@@ -71,7 +124,7 @@ component provides App requires io.Output out, data.StringUtil strUtil, data.Int
 	void remoteLocalSeparation() {
 		if ((remoteConfigs == null) || (localConfigs == null)) {
 			out.println("$(debugMSG) Separating local and remote compositions...")
-			String configs[] = assembly.getAllConfigs()
+			String configs[] = perception.getAllConfigs()
 			for (int confPointer = 0; confPointer < configs.arrayLength; confPointer++) {
 				bool remote = false
 				for (int distProxy = 0; distProxy < distributedProxies.arrayLength; distProxy++) {
@@ -101,12 +154,17 @@ component provides App requires io.Output out, data.StringUtil strUtil, data.Int
 	}
 
 	int App:main(AppParam params[]) {
-		/* Load target system */
-		assembly.setMain("../server/main.o", null)
+		perception = new Perception(true)
+		/* Loading target system and adding a monitoring proxy to it */
+		perception.setMain("../server/main.o", null)
+		perception.addProxy("|../distributor/monitoring/proxies/ServerProxy.o|*(*:server.Server[0]:*)|")
+		String configs[] = perception.getAllConfigs()
+		for (int i = 0; i < configs.arrayLength; i++) {
+			out.println("$(debugMSG) $(iu.intToString(i+1)): $(configs[i].string)")
+		}
 		loadDistributedProxies()
 		remoteLocalSeparation()
 		local()
-
 		/* command prompt */
 		char cmd[] = "start"
 		while (cmd != "exit") {

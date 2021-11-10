@@ -1,0 +1,25 @@
+uses time.DateTime
+
+data Event {
+	char type[]
+	int quantifier
+	int counter
+	DateTime started
+	DateTime finished
+}
+
+data Metric {
+	char name[]
+	int value
+	bool high// true means the higher the value the better
+	int counter
+	DateTime started
+	DateTime finished
+}
+
+interface BeingMonitored {
+	Event[] getEvents()
+	Metric[] getMetrics()
+	void turnMonitorOn()
+	void turnMonitorOff()
+}

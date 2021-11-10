@@ -1,0 +1,109 @@
+// Container
+//
+// Component that controls collection of metrics and events in the Proxy
+//
+// Author: Roberto Rodrigues Filho
+// February @ 2017
+
+const char debugMSG[] = "[@ResponseTime]"
+
+component provides monitoring.Container requires io.Output out, data.IntUtil iu, data.adt.HashTable, time.Calendar ic {
+	bool collect
+	HashTable metrics
+	HashTable events
+
+	Mutex metricsLock 	= new Mutex()
+	Mutex eventsLock 	= new Mutex()
+	Mutex collectLock 	= new Mutex()
+	//Mutex lock = new Mutex()
+
+	Event[] Container:getEvents() {
+		mutex (eventsLock) {
+			if (events == null) { events = new HashTable() }
+			HashTableItem dataEvents[] = events.getContents()
+			Event listEvents[] = new Event[dataEvents.arrayLength]
+			for (int i = 0; i < dataEvents.arrayLength; i++) { 
+				listEvents[i] = dataEvents[i].value
+			}
+			events = null
+			return listEvents
+		}
+	}
+
+	Metric[] Container:getMetrics() {
+		mutex (metricsLock) {
+			if (metrics == null) { metrics = new HashTable() }
+			HashTableItem dataMetrics[] = metrics.getContents()
+			Metric listMetrics[] = new Metric[dataMetrics.arrayLength]
+			for (int i = 0; i < dataMetrics.arrayLength; i++) {
+				listMetrics[i] = dataMetrics[i].value
+			}
+			metrics = null
+			return listMetrics
+		}
+	}
+
+	void Container:addMetric(char name[], int value, bool high) {
+		mutex(collectLock) {
+			if (collect) {
+				mutex (metricsLock) {
+					Metric newMetric 	= new Metric()
+					newMetric.name 		= name
+					newMetric.value 	= value
+					newMetric.high 		= high
+					newMetric.started 	= ic.getTime()
+					newMetric.finished 	= newMetric.started
+					newMetric.counter 	= 1
+					if (metrics == null) { metrics = new HashTable() }
+					Metric m = metrics.get(newMetric.name)
+					if (m == null) { metrics.put(newMetric.name, newMetric) }
+					else {
+						int newValue
+						/*
+						if ((((m.value/m.counter)*4) < (newMetric.value)) || 
+							(((m.value/m.counter)/4) > (newMetric.value))) {
+							newValue = m.value
+						} else {
+							newValue = m.value + newMetric.value
+							if (newValue < m.value) { newValue = INT_MAX }	
+						}*/
+						newValue = m.value + newMetric.value
+						if (newValue < m.value) { newValue = INT_MAX }
+						newMetric.value 	= newValue
+						newMetric.counter 	= m.counter + newMetric.counter
+						newMetric.started 	= m.started
+						metrics.update(newMetric.name, newMetric)
+					}
+				}
+			}	
+		}
+	}
+
+	void Container:addEvent(char type[], int quantifier) {
+		mutex (collectLock) {	
+			if (collect) {
+				mutex (eventsLock) {
+					Event newEvent 		= new Event()
+					newEvent.type 		= type
+					newEvent.started 	= ic.getTime()
+					newEvent.finished 	= newEvent.started
+					newEvent.counter 	= 1
+					newEvent.quantifier = quantifier
+					if (events == null) { events = new HashTable() }
+					Event e = events.get(newEvent.type)
+					if (e == null) { events.put(newEvent.type, newEvent) }
+					else {
+						newEvent.counter 	= e.counter + 1
+						newEvent.quantifier = newEvent.quantifier + e.quantifier
+						newEvent.started 	= e.started
+						events.update(newEvent.type, newEvent)
+					}
+				}
+			}
+		}
+	}
+
+	void Container:turnMonitorOn() { mutex (collectLock) { collect = true } }
+		
+	void Container:turnMonitorOff() { mutex (collectLock) { collect = false } }
+}

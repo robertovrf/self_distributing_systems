@@ -1,0 +1,10 @@
+uses monitoring.BeingMonitored
+
+interface Container {
+	Event[] getEvents()
+	Metric[] getMetrics()
+	void addMetric(char name[], int value, bool high)
+	void addEvent(char type[], int quantifier)
+	void turnMonitorOn()
+	void turnMonitorOff()
+}

@@ -1,0 +1,120 @@
+// DescriptionHandler.dn
+//
+// This component is responsible to compress and decompress configuration descriptions.
+// 
+// Author: Roberto Rodrigues Filho
+// March @ 2017
+
+component provides util.DescriptionHandler requires data.IntUtil iu, data.StringUtil strUtil {
+
+	// TODO: code is not nice... I could do better
+	char[] DescriptionHandler:compress(char desc[]) {
+		String bindings[] = strUtil.explode(desc, ",")
+		// each line has two comps, considering all comps are different, we'll need twice the size of bindings
+		String compNames[] = new String[bindings.arrayLength*2]
+		String compressedBinding[] = new String[bindings.arrayLength]
+		String bind[]
+		int globalCompNPointer = 0
+		int pointerComp1 = 0
+		int pointerComp2 = 0
+		for (int bindPointer = 0; bindPointer < bindings.arrayLength; bindPointer++) {
+			bind = strUtil.explode(bindings[bindPointer].string, ":")
+			// NOTE: if globalCompNPointer > bindings.arrayLength*2 things will break
+			if ((pointerComp1 = isCompIn(bind[0].string, compNames)) == INT_MAX) {
+				compNames[globalCompNPointer] = new String(bind[0].string)
+				pointerComp1 = globalCompNPointer
+				globalCompNPointer++
+			}
+			if ((pointerComp2 = isCompIn(bind[2].string, compNames)) == INT_MAX) {
+				compNames[globalCompNPointer] = new String(bind[2].string)
+				pointerComp2 = globalCompNPointer
+				globalCompNPointer++
+			}
+			compressedBinding[bindPointer] = new String(new char[](iu.intToString(pointerComp1), 
+				":",
+				bind[1].string,
+				":",
+				iu.intToString(pointerComp2)))
+		}
+		//char result[] = 
+		return new char[]("|", 
+			strUtil.implode(compNames, ","),
+			"|",
+			strUtil.implode(compressedBinding, ","),
+			"|")
+	}
+
+	// TODO: Is it necessary to verify if description is already compressed?
+	char[] DescriptionHandler:decompress(char desc[]) {
+		// eliminating spaces from compressedDesc
+		char description[] = strUtil.implode(strUtil.explode(desc, " "), "")
+		String helper[] = strUtil.explode(description,"|")
+		String comps[] = strUtil.explode(helper[0].string, ",")
+		char result[] = new char[]("|", helper[1].string, "|")
+		int strPointer = 0
+		char numStr[] = null
+		for (int compsPointer = 0; compsPointer < comps.arrayLength; compsPointer++) {
+			// first case: "0:"
+			numStr = new char[](",", iu.intToString(compsPointer), ":")
+			result = replaceNumber(result, numStr, comps[compsPointer].string, 
+				iu.intToString(compsPointer).arrayLength, 1)
+			numStr = new char[]("|", iu.intToString(compsPointer), ":")
+			result = replaceNumber(result, numStr, comps[compsPointer].string, 
+				iu.intToString(compsPointer).arrayLength, 1)
+			numStr = new char[]("(", iu.intToString(compsPointer), ":")
+			result = replaceNumber(result, numStr, comps[compsPointer].string, 
+				iu.intToString(compsPointer).arrayLength, 1)
+			// second case: ":0"
+			numStr = new char[](":", iu.intToString(compsPointer), ",")
+			result = replaceNumber(result, numStr, comps[compsPointer].string, 
+				iu.intToString(compsPointer).arrayLength, 1)
+			numStr = new char[](":", iu.intToString(compsPointer), "|")
+			result = replaceNumber(result, numStr, comps[compsPointer].string, 
+				iu.intToString(compsPointer).arrayLength, 1)
+			numStr = new char[](":", iu.intToString(compsPointer), ")")
+			result = replaceNumber(result, numStr, comps[compsPointer].string, 
+				iu.intToString(compsPointer).arrayLength, 1)
+			// third case: [0]
+			numStr = new char[]("[", iu.intToString(compsPointer), "]")
+			result = replaceNumber(result, numStr, comps[compsPointer].string, 
+				iu.intToString(compsPointer).arrayLength, 1)
+		}
+		return strUtil.implode(strUtil.explode(result, "|"), "")
+	}
+
+	int isCompIn(char comp[], String list[]) {
+		int pointer = 0
+		while ((list[pointer] != null) && (pointer < list.arrayLength)) {
+			if (comp == list[pointer].string) { return pointer }
+			pointer++
+		}
+		return INT_MAX
+	}
+
+	// str: string that will be updated
+	// replace: the text that will be included (the number)
+	// start: points to the point where text should be included
+	// len: the length of text that will be replaced
+	// offset: in case ":0", we'll need to start replacing after the ":"
+	char[] updateStr(char str[], char replace[], int start, int len, int offset) {
+		char result[] = null
+		if (start > 0) { result = new char[](strUtil.subString(str, 0, start+offset)) }
+		result = new char[](result, replace, 
+			strUtil.subString(str, (start+offset+len), str.arrayLength-(start+offset+len)))
+		return result
+	}
+
+	// str: string that will be updated
+	// numStr: this is the number that will be replaced
+	// replace: the name of the component that will be used to replace the actual number
+	// length: size of the number without the additions (":" and "[]")
+	// offset: in case ":0", we'll need to start replacing after the ":"
+	char[] replaceNumber(char str[], char numStr[], char replace[], int len, int offset) {
+		char result[] = new char[](str)
+		int strPointer = 0
+		while ((strPointer = strUtil.find(result, numStr)) != StringUtil.NOT_FOUND) {
+			result = updateStr(result, replace, strPointer, len, offset)
+		}
+		return result
+	}	
+}

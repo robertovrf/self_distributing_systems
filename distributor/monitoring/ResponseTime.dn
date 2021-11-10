@@ -1,0 +1,27 @@
+// ResponseTime
+//
+// Component responsible to calculate the response time in Proxies.
+//
+// Author: Roberto Rodrigues Filho
+// February @ 2017
+
+const char debugMSG[] = "[@ResponseTime]"
+
+component provides monitoring.ResponseTime requires io.Output out, data.IntUtil iu, time.Calendar ic,
+	time.DateUtil dateUtil {
+
+	DateTime dt1
+	DateTime dt2
+	DateTime result
+
+	void ResponseTime:start() {	dt1 = ic.getTime() }
+
+	void ResponseTime:finish() { dt2 = ic.getTime() }
+
+	int ResponseTime:result() {
+		if ((dt1 != null) && (dt2 != null)) {
+			return dateUtil.toMilliseconds(dateUtil.diff(dt1, dt2))
+		}
+		return 0
+	}
+}
