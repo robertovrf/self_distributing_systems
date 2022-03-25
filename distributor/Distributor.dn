@@ -7,6 +7,9 @@ const char SHARDING[]   = "sharding"
 const char LOCAL[]      = "local"
 const char PERCEPTION[] = "perception"
 const char TEST[]		= "test"
+const char TEST2[]		= "test2"
+const char TEST3[]		= "test3"
+const char TEST4[]		= "test4"
 const char EXIT[]       = "exit"
 
 component provides App requires io.Output out, data.StringUtil strUtil, data.IntUtil iu, io.Input in, 
@@ -105,6 +108,28 @@ component provides App requires io.Output out, data.StringUtil strUtil, data.Int
 				distribute("ListCPSharding.o")
 				observationLoop(10, 1000)
 				out.println("$(debugMSG) Test finished!")
+			} else if (cmd == TEST2) { 
+				out.println("$(debugMSG) Starting tests...")
+				t.sleep(10000)
+				distribute("ListCPPropagate.o")
+				t.sleep(10000)
+				local()
+				t.sleep(10000)
+				out.println("$(debugMSG) End tests...")
+			} else if (cmd == TEST3) {
+				out.println("$(debugMSG) Starting tests...")
+				local()
+				t.sleep(10000)
+				t.sleep(10000)
+				t.sleep(10000)
+				out.println("$(debugMSG) End tests...")
+			} else if (cmd == TEST4) {
+				local()
+				t.sleep(90000)
+				distribute("ListCPPropagate.o")
+				t.sleep(180000)
+				local()
+				t.sleep(90000)
 			} else {
 				out.println("Invalid command.")
 			}
@@ -175,3 +200,4 @@ component provides App requires io.Output out, data.StringUtil strUtil, data.Int
 		return 0
 	}
 }
+

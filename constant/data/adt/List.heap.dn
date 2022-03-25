@@ -1,0 +1,194 @@
+data ListItem{
+	Data item
+	ListItem next
+	ListItem prev
+}
+
+component provides List:heap(Destructor, AdaptEvents) {
+	
+	ListItem list
+	ListItem listEnd
+	ListItem iteratorNext
+	int length
+	
+	Mutex listLock = new Mutex()
+	
+	void List:add(Data item) {
+		mutex(listLock) {
+			ListItem ni = new ListItem(item)
+			if (list == null){
+				list = ni
+			} else {
+				listEnd.next = ni
+				ni.prev = listEnd
+			}
+			listEnd = ni
+			length ++
+		}
+	}
+	
+	void List:remove(Data item) {
+		mutex(listLock) {
+			ListItem lw = list
+			while (lw != null) {
+				if (lw.item === item) {
+					if (lw.prev != null)
+						lw.prev.next = lw.next
+					else
+						list = lw.next
+					if (lw.next != null)
+						lw.next.prev = lw.prev
+					else
+						listEnd = lw.prev
+					lw.next = null
+					lw.prev = null
+					length --	
+					break
+				}
+				lw = lw.next
+			}
+		}
+	}
+	
+	void List:update(Data item, Data newVersion) {
+		mutex(listLock) {
+			ListItem lw = list
+			while (lw != null) {
+				if (lw.item === item) {
+					lw.item = newVersion
+					break
+				}
+				lw = lw.next
+			}
+		}
+	}
+	
+	//iterator functions
+	// - we keep iteratorNext on the item *after* the one we're going to return
+	// - this is done so that the programmer can remove() the just-returned item
+	Data List:getFirst() {
+		mutex(listLock) {
+			iteratorIndex = 0
+			iteratorNext = list
+			ListItem current = iteratorNext
+			if (current != null) {
+				iteratorNext = iteratorNext.next
+				return current.item
+			} else {
+				return null
+			}
+		}
+	}
+	
+	Data List:getNext() {
+		mutex(listLock) {
+			ListItem current = iteratorNext
+			if (current != null) {
+				iteratorNext = iteratorNext.next
+				iteratorIndex ++
+				return current.item
+			} else {
+				iteratorIndex = 0
+				return null
+			}
+		}
+	}
+	
+	bool List:isEnd() {
+		return iteratorNext == null
+	}
+	
+	Data List:getIndex(int ndx) {
+		mutex(listLock) {
+			if (ndx >= length) throw new Exception("list index $ndx out of bounds")
+				ListItem lw = list
+			for (int i = 0; i < ndx; i++) {
+				lw = lw.next
+			}
+			return lw.item
+		}
+	}
+	
+	void List:setIndex(int ndx, Data d) {
+		mutex(listLock) {
+			if (ndx >= length) throw new Exception("list index $ndx out of bounds")
+				ListItem lw = list
+			for (int i = 0; i < ndx; i++) {
+				lw = lw.next
+			}
+			lw.item = d
+		}
+	}
+	
+	int List:getLength() {
+		mutex(listLock) {
+			return length
+		}
+	}
+	
+	Data[] List:getContents(opt Type t) {
+		mutex(listLock) {
+			Data items[]
+			if (isset t)
+				items = new Data[length] from t
+			else
+				items = new Data[length]
+			int j = 0
+			for (ListItem i = list; i != null; i = i.next) {
+				items[j] = i.item
+				j ++
+			}
+			return items
+		}
+	}
+	
+	void buildFromArray(Data items[]) {
+		clearList()
+		for (int i = 0; i < items.arrayLength; i++) {
+			add(items[i])
+		}
+	}
+	
+	bool List:clone(Object o) {
+		List src = o
+		Data items[] = src.getContents()
+		buildFromArray(items)
+		return true
+	}
+	
+	void clearList() {
+		ListItem lw = list
+		list = null
+		listEnd = null
+		while (lw != null) {
+			ListItem td = lw
+			
+			lw = lw.next
+			
+			td.next = null
+			td.prev = null
+		}
+		length = 0
+	}
+	
+	void Destructor:destroy() {
+		clearList()
+	}
+	
+	void AdaptEvents:inactive() {
+		//flatten list contents to transfer state
+		content = getContents()
+	}
+	
+	void AdaptEvents:active() {
+		//unpack list contents from transfer state
+		buildFromArray(content)
+		//recall our iterator position
+		int q = iteratorIndex
+		getFirst()
+		for (int i = 0; i < q; i++) {
+			getNext()
+		}
+	}
+	
+}

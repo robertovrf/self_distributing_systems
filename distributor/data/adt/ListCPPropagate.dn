@@ -36,41 +36,41 @@ const char LOCALHOST[] = "localhost"
 component provides List:heap(Destructor, AdaptEvents) requires data.json.JSONEncoder parser,
 	net.TCPSocket, net.TCPServerSocket, data.StringUtil strUtil, io.Output out, data.IntUtil iu {
 
-		IPAddr remoteDistsIps[] = null
-		IPAddr remoteListsIps[] = null
-		Mutex remoteListsIpsLock = new Mutex()
-		int pointer = 0
+	IPAddr remoteDistsIps[] = null
+	IPAddr remoteListsIps[] = null
+	Mutex remoteListsIpsLock = new Mutex()
+	int pointer = 0
 
-		void setupRemoteDistsIPs() {
-			if (remoteDistsIps == null) {
-				remoteDistsIps = new IPAddr[2]
-				remoteDistsIps[0] = new IPAddr()
-				remoteDistsIps[0].ip = new char[](LOCALHOST)
-				remoteDistsIps[0].port = 8081
-				remoteDistsIps[1] = new IPAddr()
-				remoteDistsIps[1].ip = new char[](LOCALHOST)
-				remoteDistsIps[1].port = 8082
-			}
+	void setupRemoteDistsIPs() {
+		if (remoteDistsIps == null) {
+			remoteDistsIps = new IPAddr[2]
+			remoteDistsIps[0] = new IPAddr()
+			remoteDistsIps[0].ip = new char[](LOCALHOST)
+			remoteDistsIps[0].port = 8081
+			remoteDistsIps[1] = new IPAddr()
+			remoteDistsIps[1].ip = new char[](LOCALHOST)
+			remoteDistsIps[1].port = 8082
 		}
+	}
 
-		void setupRemoteListsIPs() {
-			if (remoteListsIps == null) {
-				remoteListsIps = new IPAddr[2]
-				remoteListsIps[0] = new IPAddr()
-				remoteListsIps[0].ip = new char[](LOCALHOST)
-				remoteListsIps[0].port = 2010
-				remoteListsIps[1] = new IPAddr()
-				remoteListsIps[1].ip = new char[](LOCALHOST)
-				remoteListsIps[1].port = 2011
-			}
+	void setupRemoteListsIPs() {
+		if (remoteListsIps == null) {
+			remoteListsIps = new IPAddr[2]
+			remoteListsIps[0] = new IPAddr()
+			remoteListsIps[0].ip = new char[](LOCALHOST)
+			remoteListsIps[0].port = 2010
+			remoteListsIps[1] = new IPAddr()
+			remoteListsIps[1].ip = new char[](LOCALHOST)
+			remoteListsIps[1].port = 2011
 		}
+	}
 
-		void sendMsgToRemoteDists(char msg[]) {
-			setupRemoteDistsIPs()
-			for (int i = 0; i < remoteDistsIps.arrayLength; i++) {
-				connectAndSend(remoteDistsIps[i], msg, true)
-			}
+	void sendMsgToRemoteDists(char msg[]) {
+		setupRemoteDistsIPs()
+		for (int i = 0; i < remoteDistsIps.arrayLength; i++) {
+			connectAndSend(remoteDistsIps[i], msg, true)
 		}
+	}
 
 	Response parseResponse(char content[]) {
 		String helper[] = strUtil.explode(content, "!")
@@ -130,11 +130,11 @@ component provides List:heap(Destructor, AdaptEvents) requires data.json.JSONEnc
 
   void makeGroupRequest(char content[]) {
 		setupRemoteListsIPs()
-    IPAddr addr = null
-    for (int i = 0; i < remoteListsIps.arrayLength; i++) {
-      addr = remoteListsIps[i]
-      asynch::connectAndSend(addr, content, true)
-    }
+	    IPAddr addr = null
+	    for (int i = 0; i < remoteListsIps.arrayLength; i++) {
+	      addr = remoteListsIps[i]
+	      asynch::connectAndSend(addr, content, true)
+	    }
 	}
 
 	Response makeRequest(char content[]) {
@@ -152,6 +152,7 @@ component provides List:heap(Destructor, AdaptEvents) requires data.json.JSONEnc
 	}
 
 	void List:add(Data item) {
+		out.println("Estamos aqui!")
 		Request request = new Request()
 		request.functionName = ADD
 		request.numParams = 1

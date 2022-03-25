@@ -1,0 +1,22 @@
+component provides App requires io.Output out, net.http.HTTPRequest http,
+	data.IntUtil iu, data.StringUtil su, util.Random rand, time.Timer time {
+	
+	char baseUrl[] = "http://localhost:8080/"
+	char addOp[] = "add"
+	char getOp[] = "get"
+
+	void addRequest(int value) {
+		char strValue[] = new char[](iu.makeString(value))
+		char endpoint[] = new char[](baseUrl, addOp)
+		HTTPResponse resp = http.post(endpoint, null, strValue)
+		out.println("$(resp.content)")
+	}
+
+	int App:main(AppParam params[]) {
+		for (int i = 0; i < 360; i++) {
+			asynch::addRequest(i)
+			time.sleep(1000)
+		}
+		return 0
+	}
+}
