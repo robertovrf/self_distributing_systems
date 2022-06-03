@@ -12,7 +12,7 @@ $ dnc . -v
 
 Entre na pasta _distributor_ em um terminal e digite:
 
-$ dnc . -v
+$ dnc . -sp ../server -v
 
 
 ### Cliente
