@@ -152,7 +152,7 @@ component provides List:heap(Destructor, AdaptEvents) requires data.json.JSONEnc
 	}
 
 	void List:add(Data item) {
-		out.println("Estamos aqui!")
+		//out.println("Estamos aqui!")
 		Request request = new Request()
 		request.functionName = ADD
 		request.numParams = 1

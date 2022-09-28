@@ -4,7 +4,11 @@ data ListItem{
 	ListItem prev
 }
 
-component provides List:heap(Destructor, AdaptEvents) {
+data Int {
+	int i
+}
+
+component provides List:heap(Destructor, AdaptEvents) requires io.Output out, data.IntUtil iu {
 	
 	ListItem list
 	ListItem listEnd
@@ -24,6 +28,13 @@ component provides List:heap(Destructor, AdaptEvents) {
 			}
 			listEnd = ni
 			length ++
+			/*char result[] = new char[]("[")	
+			for (int i = 0; i < length; i++) {
+				Int a = list[i].item
+				result = new char[](result, " ", iu.intToString(a.i))
+			}
+			result = new char[](result, " ]")
+			out.println("$(result)")*/
 		}
 	}
 	

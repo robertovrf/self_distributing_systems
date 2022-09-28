@@ -117,7 +117,7 @@ component provides List:heap(Destructor, AdaptEvents) requires io.Output out, da
     Data[] List:getContents(opt Type t) {
         mutex(heapLock) {
             if (heap == null) { 
-                eturn new Data[] 
+                return new Data[] 
             }
             Node sortedHeapCopy[] = heapsort(heap, length)
             Data items[]
