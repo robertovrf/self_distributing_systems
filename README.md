@@ -16,6 +16,8 @@ Entre na pasta __server__ em um terminal e digite:
 
 $ dana main.o
 
+Note: Não há a necessidade de executar o servidor desta forma se for executar o Distributor, seguindo as instruções abaixo.
+
 ## Para executar o distribuidor (local e remote):
 
 Abra três terminais na pasta _distributor_. No primeiro execute:
