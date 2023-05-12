@@ -2,7 +2,7 @@ data Node {
 	int key
 }
 
-component provides List:heap(Destructor, AdaptEvents) requires io.Output out, data.IntUtil iu {
+component provides data.adt.List:heap(Destructor, AdaptEvents) requires io.Output out, data.IntUtil iu {
 	Node heap[] = null
 	int length = 0
 	Mutex heapLock = new Mutex()

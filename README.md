@@ -2,32 +2,19 @@
 
 ## Para compilar o projeto:
 
-### Servidor
+Dê permissão para o arquivo "build.sh" executar:
 
-Entre na pasta _server_ em um terminal e digite:
+$ chmod +x build.sh
 
-$ dnc . -v
+Execute-o:
 
-### Distribuidor
-
-Entre na pasta _distributor_ em um terminal e digite:
-
-$ dnc . -sp ../server -v
-
-
-### Cliente
-
-Entre na pasta _client_ em um terminal e digite:
-
-$ dnc . -v
-
+$ ./build.sh
 
 ## Para executar o servidor:
 
 Entre na pasta __server__ em um terminal e digite:
 
 $ dana main.o
-
 
 ## Para executar o distribuidor (local e remote):
 
