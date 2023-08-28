@@ -238,6 +238,7 @@ component provides List:heap(Destructor, AdaptEvents) requires data.json.JSONEnc
 		if (content != null) {
 			setupRemoteDistsIPs()
 			ShardState shardState[] = new ShardState[remoteDistsIps.arrayLength]
+			Thread thread[] = new Thread[remoteDistsIps.arrayLength]
 			for (int i = 0; i < content.arrayLength; i++) {
 				Int num = content[i]
 				int remoteIdx = hash.h(num.i, remoteDistsIps.arrayLength)
@@ -249,7 +250,10 @@ component provides List:heap(Destructor, AdaptEvents) requires data.json.JSONEnc
 			for (int i = 0; i < remoteDistsIps.arrayLength; i++) {
 				char state[] = parser.jsonFromArray(shardState[i].state, null)
 				char msg[] = new char[]("../distributor/RemoteList.o!", state, "\r\r\r\r")
-				makeRequest(remoteDistsIps[i], msg, true)
+				thread[i] = asynch::makeRequest(remoteDistsIps[i], msg, true)
+			}
+			for (int i = 0; i < remoteDistsIps.arrayLength; i++) {
+				thread[i].join()
 			}
 		}
 	}
