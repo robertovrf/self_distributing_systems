@@ -11,14 +11,18 @@ const char TEST2[]		= "test2"
 const char TEST3[]		= "test3"
 const char TEST4[]		= "test4"
 const char EXIT[]       = "exit"
+const int PORT			= 3500
 
 component provides App requires io.Output out, data.StringUtil strUtil, data.IntUtil iu, io.Input in, 
-	monitoring.Perception, data.json.JSONEncoder encoder, data.DecUtil du, time.Timer t {
+	monitoring.Perception, data.json.JSONEncoder encoder, data.DecUtil du, time.Timer t, 
+	http.HTTPUtil httpUtil, net.TCPSocket, net.TCPServerSocket {
 
 	String remoteConfigs[] 		= null
 	String localConfigs[] 		= null
 	String distributedProxies[] = null
 	Perception perception 		= null
+	String configs[]			= null
+	int currentConfigIndex		= 0
 
 	void help() {
 		out.println("Command list:")
@@ -34,9 +38,14 @@ component provides App requires io.Output out, data.StringUtil strUtil, data.Int
 	void local() {
 		perception.setConfig(localConfigs[0].string)
 		out.println("$(debugMSG) Local composition running.")
+		currentConfigIndex = 0
 	}
 
 	void distribute(char proxyInterface[]) {
+		if (proxyInterface == "ListCPPropagate.o") { currentConfigIndex = 1 }
+		else if (proxyInterface == "ListCPAlternate.o") { currentConfigIndex = 2 }
+		else if (proxyInterface == "ListCPSharding.o") { currentConfigIndex = 3 }
+
 		char remoteConfig[] = getRemoteConfig("data/adt/$(proxyInterface)")
 		if (remoteConfig != null) {	
 			perception.setConfig(remoteConfig)
@@ -149,19 +158,19 @@ component provides App requires io.Output out, data.StringUtil strUtil, data.Int
 	void remoteLocalSeparation() {
 		if ((remoteConfigs == null) || (localConfigs == null)) {
 			out.println("$(debugMSG) Separating local and remote compositions...")
-			String configs[] = perception.getAllConfigs()
-			for (int confPointer = 0; confPointer < configs.arrayLength; confPointer++) {
+			String configsHelper[] = perception.getAllConfigs()
+			for (int confPointer = 0; confPointer < configsHelper.arrayLength; confPointer++) {
 				bool remote = false
 				for (int distProxy = 0; distProxy < distributedProxies.arrayLength; distProxy++) {
-					if (strUtil.find(configs[confPointer].string, distributedProxies[distProxy].string) 
+					if (strUtil.find(configsHelper[confPointer].string, distributedProxies[distProxy].string) 
 						!= StringUtil.NOT_FOUND) {
-						remoteConfigs = new String[](remoteConfigs, configs[confPointer])
+						remoteConfigs = new String[](remoteConfigs, configsHelper[confPointer])
 						remote = true
 						break
 					}
 				}
 				if (!remote) {
-					localConfigs = new String[](localConfigs, configs[confPointer])
+					localConfigs = new String[](localConfigs, configsHelper[confPointer])
 				}
 			}
 		}
@@ -178,18 +187,91 @@ component provides App requires io.Output out, data.StringUtil strUtil, data.Int
 		}
 	}
 
+	void changeConfiguration(int newConfigurationIndex) {
+		// this is hard-coded for now...
+		if (newConfigurationIndex == 0) { local() }
+		else if (newConfigurationIndex == 1) { distribute("ListCPPropagate.o") }
+		else if (newConfigurationIndex == 2) { distribute("ListCPAlternate.o") }
+		else if (newConfigurationIndex == 3) { distribute("ListCPSharding.o") }
+	}
+
+	dec averageResponseTime(Metric m) {
+		out.println("IV $(iu.intToString(m.value)) / $(iu.intToString(m.counter)) ")
+		dec value =  m.value
+		dec counter = m.counter
+		return value / counter 
+	}
+
+	void sendResponse(HTTPMessage httpMessage, char response[]) {
+		httpMessage.socket.send("HTTP/1.1 200 OK\r\n")
+		httpMessage.socket.send("Server: $(HTTPUtil.SERVER_NAME)\r\n")
+		httpMessage.socket.send("Content-Encoding: binary\r\n")
+		httpMessage.socket.send("Content-Length: $(iu.intToString(response.arrayLength))\r\n")
+		httpMessage.socket.send("Connection: close\r\n")
+		httpMessage.socket.send("Content-Type: $(httpMessage.mimeType)\r\n")
+		httpMessage.socket.send("\r\n")
+		httpMessage.socket.send(response)
+	}
+
+	void startAPI() {
+		TCPServerSocket host = new TCPServerSocket()
+		// binding server socket
+		if (!host.bind(TCPServerSocket.ANY_ADDRESS, PORT)) {
+			out.println("Error: failed to bind master socket")
+			return
+		}
+		while (true) {
+			TCPSocket client = new TCPSocket()
+			if (client.accept(host)) {
+				HTTPMessage message = httpUtil.readHTTPRequest(client)
+				// GET /ucb/init
+				if (strUtil.ifind(message.resource, "/ucb/init") != StringUtil.NOT_FOUND && (message.command == "GET")) {
+					sendResponse(message, iu.intToString(configs.arrayLength))
+				}
+				// GET /ucb/perception-data
+				if (strUtil.ifind(message.resource, "/ucb/perception-data") != StringUtil.NOT_FOUND && (message.command == "GET")) {
+					PerceptionData pD[] = encoder.jsonToArray(perception.getPerceptionData(), typeof(PerceptionData[]), null)
+					PerceptionData perceptionData = pD[0]
+					bool hasMetric = false
+					for (int j = 0; j < perceptionData.metrics.arrayLength; j++) {
+						if (perceptionData.metrics[j].name == "response_time") {
+							hasMetric = true
+							dec responseTime = averageResponseTime(perceptionData.metrics[j])
+							char response[] = new char[](
+								iu.intToString(currentConfigIndex), 
+								"|", 
+								du.decToString(responseTime))
+								sendResponse(message, response)
+						}
+					}	
+					if (!hasMetric) {
+						sendResponse(message, "NOT FOUND")
+					}
+				}
+				// POST /ucb/composition
+				if (strUtil.ifind(message.resource, "/ucb/composition") != StringUtil.NOT_FOUND && (message.command == "POST")) {
+					// TODO: create a mechanism to verify whether the adaptation happened or not
+					// and send a reply message accordingly
+					changeConfiguration(iu.intFromString(message.postData))
+					sendResponse(message, "OK")
+				}
+			}
+		}
+	}
+
 	int App:main(AppParam params[]) {
 		perception = new Perception(true)
 		/* Loading target system and adding a monitoring proxy to it */
 		perception.setMain("../server/main.o", null)
 		perception.addProxy("|../distributor/monitoring/proxies/ServerProxy.o|*(*:server.Server[0]:*)|")
-		String configs[] = perception.getAllConfigs()
+		configs = perception.getAllConfigs()
 		for (int i = 0; i < configs.arrayLength; i++) {
 			out.println("$(debugMSG) $(iu.intToString(i+1)): $(configs[i].string)")
 		}
 		loadDistributedProxies()
 		remoteLocalSeparation()
 		local()
+		asynch::startAPI()
 		/* command prompt */
 		char cmd[] = "start"
 		while (cmd != "exit") {
