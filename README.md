@@ -33,3 +33,9 @@ Em um terceiro terminal digite:
 $ dana -sp ../readn RemoteDist.o 8082 2011
 
 A primeira composição do servidor que o Distribuidor monta é a versão local. Para distribuí-lo, digite help e escolhar qual opção de distribuir. Para tornar o servidor todo local novamente, digite local.
+
+## Para executar o script em Python:
+
+Entre na pasta "python_scripts" e depois execute:
+
+$ python3 example.py
