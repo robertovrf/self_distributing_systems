@@ -12,6 +12,8 @@ def getPerceptionData():
     response = requests.get(f"{base_url}:{base_port}/ucb/perception-data")
     if (response.content.decode('utf-8') == "NOT FOUND"):
         print("Something went wrong!")
+        return
+
     action, average_response_time = response.content.decode('utf-8').split("|")
     print(f"Action {action} with average response time {average_response_time}")
 
