@@ -35,7 +35,11 @@ component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocke
 		if ((remote == null) || (remote.arrayLength > 1)) { throw new Exception("Something went wrong!") }
 		else {
 			// parsing state to Data
-			Int content[] = encoder.jsonToArray(state, typeof(Int[]), null)
+			Int content[] = new Int[]
+			if (state != null && state != "") {
+				content = encoder.jsonToArray(state, typeof(Int[]), null)
+			}
+
 			// adding content to list in the object
 			Object objects[] = remote[0].class.getObjects("data.adt.List:heap")
 			List list = objects[0]
@@ -80,7 +84,7 @@ component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocke
 		} else {
 			clearState()
 		}
-		client.send("OK")
+		client.send("OK\r\r\r\r")
 		client.disconnect()
 	}
 

@@ -101,6 +101,7 @@ component provides List:heap(Destructor, AdaptEvents) requires data.json.JSONEnc
 				}
 			}
 		}
+
 		if (response == null) { s.disconnect() }
 		return response
 	}
@@ -247,8 +248,13 @@ component provides List:heap(Destructor, AdaptEvents) requires data.json.JSONEnc
 				}
 				shardState[remoteIdx].state = new Int[](shardState[remoteIdx].state, num)
 			}
+
 			for (int i = 0; i < remoteDistsIps.arrayLength; i++) {
-				char state[] = parser.jsonFromArray(shardState[i].state, null)
+				char state[] = null
+				if (shardState[i] != null) {
+					state = parser.jsonFromArray(shardState[i].state, null)
+				}
+
 				char msg[] = new char[]("../distributor/RemoteList.o!", state, "\r\r\r\r")
 				thread[i] = asynch::makeRequest(remoteDistsIps[i], msg, true)
 			}
