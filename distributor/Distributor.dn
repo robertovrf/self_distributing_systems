@@ -4,6 +4,7 @@ const char HELP[]       = "help"
 const char ALTERNATE[]  = "alternate"
 const char PROPAGATE[]  = "propagate"
 const char SHARDING[]   = "sharding"
+const char DYNAMIC[]    = "dynamic"
 const char LOCAL[]      = "local"
 const char PERCEPTION[] = "perception"
 const char TEST[]		= "test"
@@ -30,6 +31,7 @@ component provides App requires io.Output out, data.StringUtil strUtil, data.Int
 		out.println(" $(ALTERNATE) - to distribute list alternating requests between replicas")
 		out.println(" $(PROPAGATE) - to distribute list propagating write requests to all replicas")
 		out.println(" $(SHARDING) - to distribute list with sharding")
+		out.println(" $(DYNAMIC) - to distribute list with dynamic sharding")
 		out.println(" $(LOCAL) - to bring list locally")
 		out.println(" $(PERCEPTION) - to get perception data from the current running composition")
 		out.println(" $(EXIT) - to finish execution")
@@ -45,9 +47,10 @@ component provides App requires io.Output out, data.StringUtil strUtil, data.Int
 		if (proxyInterface == "ListCPPropagate.o") { currentConfigIndex = 1 }
 		else if (proxyInterface == "ListCPAlternate.o") { currentConfigIndex = 2 }
 		else if (proxyInterface == "ListCPSharding.o") { currentConfigIndex = 3 }
+		else if (proxyInterface == "ListCPDynamicSharding.o") { currentConfigIndex = 4 }
 
 		char remoteConfig[] = getRemoteConfig("data/adt/$(proxyInterface)")
-		if (remoteConfig != null) {	
+		if (remoteConfig != null) {
 			perception.setConfig(remoteConfig)
 			out.println("$(debugMSG) Remote composition [($proxyInterface)] running.")	
 		} else {
@@ -102,6 +105,8 @@ component provides App requires io.Output out, data.StringUtil strUtil, data.Int
 				distribute("ListCPAlternate.o")
 			} else if (cmd == SHARDING) {
 				distribute("ListCPSharding.o")
+			} else if (cmd == DYNAMIC) {
+				distribute("ListCPDynamicSharding.o")
 			} else if (cmd == LOCAL) {
 				local()
 			} else if (cmd == PERCEPTION) {
@@ -183,7 +188,9 @@ component provides App requires io.Output out, data.StringUtil strUtil, data.Int
 			distributedProxies = new String[](
 				new String("ListCPPropagate.o"),
 				new String("ListCPAlternate.o"),
-				new String("ListCPSharding.o"))
+				new String("ListCPSharding.o"),
+				new String("ListCPDynamicSharding.o"),
+			)
 		}
 	}
 
@@ -193,6 +200,7 @@ component provides App requires io.Output out, data.StringUtil strUtil, data.Int
 		else if (newConfigurationIndex == 1) { distribute("ListCPPropagate.o") }
 		else if (newConfigurationIndex == 2) { distribute("ListCPAlternate.o") }
 		else if (newConfigurationIndex == 3) { distribute("ListCPSharding.o") }
+		else if (newConfigurationIndex == 4) { distribute("ListCPDynamicSharding.o") }
 	}
 
 	dec averageResponseTime(Metric m) {

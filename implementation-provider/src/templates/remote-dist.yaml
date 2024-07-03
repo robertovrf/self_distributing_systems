@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: remote-dist-{{ replica }}
+  labels:
+    app: remote-dist
+    replica: "{{ replica }}"
+    implementation: "{{ implementation }}"
+    app.kubernetes.io/managed-by: implementation-provider
+spec:
+  containers:
+  - name: remote-dist
+    image: robertovrf/remote-dist:all
+    imagePullPolicy: IfNotPresent
+    ports:
+    - containerPort: 2011
+    - containerPort: 2010
+    env:
+{{ env | to_yaml | indent(6, true) }}

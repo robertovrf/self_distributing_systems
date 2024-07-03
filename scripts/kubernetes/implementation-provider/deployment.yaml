@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: implementation-provider
+  labels:
+    app: implementation-provider
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: implementation-provider
+  template:
+    metadata:
+      labels:
+        app: implementation-provider
+    spec:
+      containers:
+      - name: api
+        image: implementation-provider:latest
+        imagePullPolicy: IfNotPresent
+      serviceAccountName: cluster-admin
