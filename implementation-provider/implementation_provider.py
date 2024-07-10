@@ -9,6 +9,7 @@ from src.log_config import log_config
 import time
 import logging
 import json
+import uuid
 
 dictConfig(log_config)
 logger = logging.getLogger("implementation-provider")
@@ -37,11 +38,15 @@ class DistributeRequest:
 class DestroyRequest:
     implementation: str
 
-def retrieve_service_ips():
+def retrieve_ips(uuid: str):
+    selector = f"{LABEL_SELECTOR},id={uuid}"
     k8s_core_v1 = client.CoreV1Api()
-    services = k8s_core_v1.list_namespaced_service(namespace="default", label_selector=LABEL_SELECTOR)
+    services = k8s_core_v1.list_namespaced_service(namespace="default", label_selector=selector)
     replica_ip = [(x.metadata.labels["replica"], x.status.load_balancer.ingress[0].ip) for x in services.items if x.status.load_balancer.ingress]
-    return [x[1] for x in sorted(replica_ip, key=lambda x: x[0])]
+
+    pods = k8s_core_v1.list_namespaced_pod(namespace="default", label_selector=selector)
+    ready_replicas = [x.metadata.labels["replica"] for x in pods.items if all([status.ready for status in x.status.container_statuses])]
+    return [x[1] for x in sorted(replica_ip, key=lambda x: x[0]) if x[0] in ready_replicas]
 
 @app.post("/distribute")
 def distribute(request: DistributeRequest):
@@ -49,8 +54,12 @@ def distribute(request: DistributeRequest):
     if len(request.metadata) != request.replicas:
         raise HTTPException(status_code=400, detail="Length of metadata should be equal to the number of replicas")
 
+    destroy(DestroyRequest(implementation=request.implementation))
+
     pod_template = jinja_env.get_template(REMOTE_DIST_POD_PATH)
     service_template = jinja_env.get_template(REMOTE_DIST_SERVICE_PATH)
+
+    request_uuid = str(uuid.uuid4())[-12:]
 
     k8s_core_v1 = client.CoreV1Api()
     for replica in range(request.replicas):
@@ -58,8 +67,8 @@ def distribute(request: DistributeRequest):
         env = [{ "name": key, "value": value if type(value) == str else json.dumps(value) } for key, value in env_dict.items()]
 
         implementation_name = request.implementation.split("/")[-1]
-        pod = pod_template.render(replica=replica, implementation=implementation_name, env=env)
-        service = service_template.render(replica=replica, implementation=implementation_name)
+        pod = pod_template.render(replica=replica, implementation=implementation_name, env=env, uuid=request_uuid)
+        service = service_template.render(replica=replica, implementation=implementation_name, uuid=request_uuid)
 
         try:
             k8s_core_v1.create_namespaced_pod(body=safe_load(pod), namespace="default")
@@ -70,18 +79,17 @@ def distribute(request: DistributeRequest):
 
             raise e
 
-    ips = retrieve_service_ips()
+    ips = retrieve_ips(request_uuid)
     while len(ips) != request.replicas:
         time.sleep(0.25)
-        ips = retrieve_service_ips()
+        ips = retrieve_ips(request_uuid)
 
     return ips
 
 @app.post("/destroy")
 def destroy(request: DestroyRequest):
-    k8s_core_v1 = client.CoreV1Api()
     selector = f"{LABEL_SELECTOR},implementation={request.implementation.split("/")[-1]}"
-    k8s_core_v1.delete_collection_namespaced_pod(namespace="default", label_selector=selector)
-    k8s_core_v1.delete_collection_namespaced_service(namespace="default", label_selector=selector)
+    k8s_core_v1.delete_collection_namespaced_pod(namespace="default", label_selector=selector, grace_period_seconds=1)
+    k8s_core_v1.delete_collection_namespaced_service(namespace="default", label_selector=selector, grace_period_seconds=1)
 
     return "OK"
