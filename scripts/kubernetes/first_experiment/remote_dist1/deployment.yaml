@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: remote-dist
+  labels:
+    app: remote-dist
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: remote-dist
+  template:
+    metadata:
+      labels:
+        app: remote-dist
+    spec:
+      containers:
+      - name: remote-dist
+        image: robertovrf/remote-dist:all
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 2011
+        - containerPort: 2010
