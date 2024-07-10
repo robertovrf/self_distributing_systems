@@ -58,11 +58,11 @@ component provides data.adt.List:heap(Destructor, AdaptEvents) requires io.Outpu
                 if (heap[i] == itemToRemove) {
                     itemIdx = i
                     heap[i] = heap[length-1]
-                    break
+                    length--
+                    heapify(heap, length, itemIdx)
+                    return
                 }
             }
-            length--
-            heapify(heap, length, itemIdx)
         }
     }
 

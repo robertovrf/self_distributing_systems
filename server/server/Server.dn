@@ -23,6 +23,10 @@ component provides server.Server requires io.Output out, data.adt.List:heap list
 			Int num = new Int(iu.intFromString(msg.postData))
 			list.add(num)
 			sendResponse(msg, "OK")
+		} else if (msg.command == "DELETE") {
+			Int num = new Int(iu.intFromString(msg.postData))
+			list.remove(num)
+			sendResponse(msg, "OK")
 		}
 	}
 

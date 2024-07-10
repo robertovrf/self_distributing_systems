@@ -21,7 +21,7 @@ component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocke
 			return 1
 		}
 
-		//out.println("Server is up and running...")
+		// out.println("Server is up and running...")
 
 		// handling incoming requests
 		while (true) {

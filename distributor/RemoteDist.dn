@@ -10,7 +10,7 @@ const int DEFAULT_APP_PORT  = 2010
 
 component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocket,
 	data.StringUtil strUtil, composition.Assembly assembly, data.json.JSONEncoder encoder,
-	data.IntUtil iu {
+	data.IntUtil iu, os.SystemInfo sys, io.FileSystem fileSystem, io.TextFile {
 
 	IDCReference remote[] 	= null
 	int portDist 			= 0
@@ -19,6 +19,7 @@ component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocke
 
 	void startRemoteProcess(char remoteP[], char state[]) {
 		// load and start relocated component
+		fileSystem.delete("/tmp/ready")
 		if (!running) {
 			AppParam params[] = new AppParam[1]
 			params[0] = new AppParam()
@@ -27,23 +28,33 @@ component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocke
 			assembly.removeComp(new String[](
 				new String("./data/adt/ListCPPropagate.o"),
 				new String("./data/adt/ListCPAlternate.o"),
-				new String("./data/adt/ListCPSharding.o")))
+				new String("./data/adt/ListCPSharding.o"),
+				new String("./data/adt/ListCPDynamicSharding.o")
+			))
 			out.println("$(debugMSG) Remote Component $(remoteP) Started! ")
 			running = true
 			remote = assembly.getCompsByProvidedInterface("proxy.DistProxy")
 		}
 		if ((remote == null) || (remote.arrayLength > 1)) { throw new Exception("Something went wrong!") }
-		else {
-			// parsing state to Data
-			Int content[] = encoder.jsonToArray(state, typeof(Int[]), null)
-			// adding content to list in the object
-			Object objects[] = remote[0].class.getObjects("data.adt.List:heap")
-			List list = objects[0]
-			for (int i = 0; i < content.arrayLength; i++) {
-				list.add(content[i])
-			}
-			out.println("$(debugMSG) State inserted!")
+
+		// parsing state to Data
+		Int content[] = new Int[]
+		if (state != null && state != "") {
+			content = encoder.jsonToArray(state, typeof(Int[]), null)
 		}
+
+		// adding content to list in the object
+		Object objects[] = remote[0].class.getObjects("data.adt.List:heap")
+		List list = objects[0]
+		for (int i = 0; i < content.arrayLength; i++) {
+			list.add(content[i])
+		}
+		out.println("$(debugMSG) State inserted!")
+
+		TextFile f = new TextFile(new char[]("/tmp/ready"), File.WRITE)
+		f.writeLine("ok")
+		f.flush()
+		f.close()
 	}
 
 	// TODO: need to pause component, wait for object to finish processing
@@ -91,6 +102,13 @@ component provides App requires io.Output out, net.TCPSocket, net.TCPServerSocke
 		} else {
 			portDist = DEFAULT_DIST_PORT
 			portApp = DEFAULT_APP_PORT
+		}
+
+		char impl[] = sys.getVariable("IMPLEMENTATION")
+		if (impl != "") {
+			char state[] = sys.getVariable("STATE")
+			out.println("Starting remote dist with implementation $(impl)")
+			startRemoteProcess(impl, state)
 		}
 
 		// instantiating variables

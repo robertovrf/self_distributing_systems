@@ -32,40 +32,26 @@ data ShardState {
 const char ADD[]          = "add"
 const char GET_LENGTH[]   = "getLength"
 const char GET_CONTENTS[] = "getContents"
+const char DELETE[] 	  = "delete"
 const char CLEAR_LIST[]   = "clearList"
 
 /* IPs */
-const char IP1[] = "localhost"
-const char IP2[] = "localhost"
+const char IMPLEMENTATION_PROVIDER_HOST[] = "http://172.18.0.2:8000"
 
 component provides List:heap(Destructor, AdaptEvents) requires data.json.JSONEncoder parser,
 	net.TCPSocket, data.StringUtil strUtil, io.Output out, data.IntUtil iu,
-	hash.Multiplicative hash
+	hash.Multiplicative hash, net.http.HTTPRequest http, util.Math math
 {
-	IPAddr remoteDistsIps[] = null
+	IPAddr implementationProviderIP = null
 	IPAddr remoteListsIps[] = null
+	int shards = 2
 
-	void setupRemoteDistsIPs() {
-		if (remoteDistsIps == null) {
-			remoteDistsIps = new IPAddr[2]
-			remoteDistsIps[0] = new IPAddr()
-			remoteDistsIps[0].ip = new char[](IP1)
-			remoteDistsIps[0].port = 8081
-			remoteDistsIps[1] = new IPAddr()
-			remoteDistsIps[1].ip = new char[](IP2)
-			remoteDistsIps[1].port = 8082
-		}
-	}
-
-	void setupRemoteListsIPs() {
-		if (remoteListsIps == null) {
-			remoteListsIps = new IPAddr[2]
-			remoteListsIps[0] = new IPAddr()
-			remoteListsIps[0].ip = new char[](IP1)
-			remoteListsIps[0].port = 2010
-			remoteListsIps[1] = new IPAddr()
-			remoteListsIps[1].ip = new char[](IP2)
-			remoteListsIps[1].port = 2011
+	void setupRemoteListsIPs(String ips[]) {
+		remoteListsIps = new IPAddr[ips.arrayLength]
+		for (int i = 0; i < ips.arrayLength; i++) {
+			remoteListsIps[i] = new IPAddr()
+			remoteListsIps[i].ip = new char[](ips[i].string)
+			remoteListsIps[i].port = 2010
 		}
 	}
 
@@ -140,15 +126,23 @@ component provides List:heap(Destructor, AdaptEvents) requires data.json.JSONEnc
 		char param[] = parser.jsonFromData(item, null)
 		char content2[] = new char[](requestStr, "!", param, "\r\r\r\r")
 		// get the replica IP based on the item hash
-		setupRemoteListsIPs()
 		Int num = item
 		IPAddr addr = remoteListsIps[hash.h(num.i, remoteListsIps.arrayLength)]
 		// send to remote list
-		makeRequest(addr, content2, false)
+		makeRequest(addr, content2, true)
 	}
 
 	void List:remove(Data item) {
-		// TODO
+		Request request = new Request()
+		request.functionName = DELETE
+		request.numParams = 1
+		char requestStr[] = parser.jsonFromData(request, null)
+		char itemParam[] = parser.jsonFromData(item, null)
+		char requestContent[] = new char[](requestStr, "!", itemParam, "\r\r\r\r")
+		
+		Int num = item
+		IPAddr addr = remoteListsIps[hash.h(num.i, remoteListsIps.arrayLength)]
+		makeRequest(addr, requestContent, true)
 	}
 
 	void List:update(Data item, Data newVersion) {
@@ -197,15 +191,16 @@ component provides List:heap(Destructor, AdaptEvents) requires data.json.JSONEnc
 
 	Data[] List:getContents(opt Type t) {
 		// build request
+		out.println("Getting dynamic sharding contents")
 		Request request = new Request()
 		request.functionName = GET_CONTENTS
 		request.numParams = 0
 		char requestStr[] = parser.jsonFromData(request, null)
 		char content2[] = new char[](requestStr, "!", " ", "\r\r\r\r")
 		// get the contents from all replicas
-		setupRemoteListsIPs()
 		Int contents[] = null
 		for (int i = 0; i < remoteListsIps.arrayLength; i++) {
+			out.println("Sending request to $(remoteListsIps[i].ip)")
 			Response response = makeRequest(remoteListsIps[i], content2, true)
 			Int nums[] = parser.jsonToArray(response.value, typeof(Int[]), null)
 			contents = new Int[](contents, nums)
@@ -230,43 +225,64 @@ component provides List:heap(Destructor, AdaptEvents) requires data.json.JSONEnc
 	}
 
 	void AdaptEvents:inactive() {
-		if (content != null) {
-			content = getContents()
-			char msg[] = new char[]("clearList!\r\r\r\r")
-			setupRemoteDistsIPs()
-			for (int i = 0; i < remoteDistsIps.arrayLength; i++) {
-				makeRequest(remoteDistsIps[i], msg, true)
-			}
+		if (content == null) {
+			out.println("Content is null, skipping...")
+			return
 		}
+
+		content = getContents()
+		char msg[] = "{\"implementation\":\"../distributor/RemoteList.o\"}"
+		HTTPResponse resp = http.post(new char[](IMPLEMENTATION_PROVIDER_HOST, "/destroy"), null, msg)
 	}
 
-	// this is extremely hardcoded! ):
 	void AdaptEvents:active() {
-		if (content != null) {
-			setupRemoteDistsIPs()
-			ShardState shardState[] = new ShardState[remoteDistsIps.arrayLength]
-			Thread thread[] = new Thread[remoteDistsIps.arrayLength]
-			for (int i = 0; i < content.arrayLength; i++) {
-				Int num = content[i]
-				int remoteIdx = hash.h(num.i, remoteDistsIps.arrayLength)
-				if (shardState[remoteIdx] == null) {
-					shardState[remoteIdx] = new ShardState()
-				}
-				shardState[remoteIdx].state = new Int[](shardState[remoteIdx].state, num)
+		out.println("Dynamic Sharding connected")
+		if (content == null) {
+			out.println("Content is null, skipping...")
+			return
+		}
+
+		int length = content.arrayLength
+		out.println("Length is $(length)")
+		shards = 1
+		if (length >= 9000) {
+			shards = 8
+		} else if (length >= 6000) {
+			shards = 4
+		} else if (length >= 2000 ) {
+			shards = 2
+		}
+
+		ShardState shardState[] = new ShardState[shards]
+		for (int i = 0; i < content.arrayLength; i++) {
+			Int num = content[i]
+			int remoteIdx = hash.h(num.i, shards)
+			if (shardState[remoteIdx] == null) {
+				shardState[remoteIdx] = new ShardState()
+			}
+			shardState[remoteIdx].state = new Int[](shardState[remoteIdx].state, num)
+		}
+
+		char msg[] = new char[]("{\"implementation\":\"../distributor/RemoteList.o\",\"replicas\":$(shards),\"metadata\":[")
+		for (int i = 0; i < shards; i++) {
+			char state[] = null
+			if (shardState[i] != null) {
+				state = parser.jsonFromArray(shardState[i].state, null)
 			}
 
-			for (int i = 0; i < remoteDistsIps.arrayLength; i++) {
-				char state[] = null
-				if (shardState[i] != null) {
-					state = parser.jsonFromArray(shardState[i].state, null)
-				}
-
-				char msg[] = new char[]("../distributor/RemoteList.o!", state, "\r\r\r\r")
-				thread[i] = asynch::makeRequest(remoteDistsIps[i], msg, true)
+			if (state == null) {
+				state = "[]"
 			}
-			for (int i = 0; i < remoteDistsIps.arrayLength; i++) {
-				thread[i].join()
+
+			msg = new char[](msg, "{\"STATE\":$(state)}")
+			if (i < shards - 1) {
+				msg = new char[](msg, ",")
 			}
 		}
+
+		msg = new char[](msg, "]}")
+		HTTPResponse resp = http.post(new char[](IMPLEMENTATION_PROVIDER_HOST, "/distribute"), null, msg)
+		String ips[] = parser.jsonToArray(resp.content, typeof(String[]), null)
+		setupRemoteListsIPs(ips)
 	}
 }

@@ -23,6 +23,7 @@ data Int {
 const char ADD[]          = "add"
 const char GET_LENGTH[]   = "getLength"
 const char GET_CONTENTS[] = "getContents"
+const char DELETE[] 	  = "delete"
 
 component provides proxy.DistProxy requires io.Output out, data.IntUtil iu, net.TCPSocket,
 	net.TCPServerSocket, data.adt.List:heap list, data.json.JSONEncoder parser, data.StringUtil strUtil  {
@@ -65,16 +66,27 @@ component provides proxy.DistProxy requires io.Output out, data.IntUtil iu, net.
 		return response
 	}
 
+	Response deleteRequest(Request request) {
+		Response response = new Response()
+
+		Int item = parser.jsonToData(request.params[0].value, typeof(Int), null)
+		list.remove(item)
+
+		response.status = 1
+		response.value = ""
+
+		return response
+	}
+
 	Response interpretRequest(Request request) {
 		if (request.functionName == ADD) {
 			return addRequest(request)
-
 		} else if (request.functionName == GET_LENGTH) {
 			return getLengthRequest(request)
-
 		} else if (request.functionName == GET_CONTENTS) {
 			return getContentsRequest(request)
-
+		} else if (request.functionName == DELETE) {
+			return deleteRequest(request)
 		} else {
 			Response response = new Response()
 			response.status = 2

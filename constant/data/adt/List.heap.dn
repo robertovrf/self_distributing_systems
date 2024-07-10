@@ -27,14 +27,19 @@ component provides data.adt.List:heap(Destructor, AdaptEvents) requires io.Outpu
 				ni.prev = listEnd
 			}
 			listEnd = ni
-			length ++
-			/*char result[] = new char[]("[")	
-			for (int i = 0; i < length; i++) {
-				Int a = list[i].item
-				result = new char[](result, " ", iu.intToString(a.i))
-			}
-			result = new char[](result, " ]")
-			out.println("$(result)")*/
+			length++
+			
+
+			// ListItem current = list
+			// char result[] = new char[]("[")	
+			// while (current != null) {
+			// 	Int a = current.item
+			// 	result = new char[](result, " ", iu.intToString(a.i))
+			// 	current = current.next
+			// }
+
+			// result = new char[](result, " ]")
+			// out.println("$(result)")
 		}
 	}
 	
@@ -42,7 +47,7 @@ component provides data.adt.List:heap(Destructor, AdaptEvents) requires io.Outpu
 		mutex(listLock) {
 			ListItem lw = list
 			while (lw != null) {
-				if (lw.item === item) {
+				if (lw.item == item) {
 					if (lw.prev != null)
 						lw.prev.next = lw.next
 					else
@@ -53,11 +58,22 @@ component provides data.adt.List:heap(Destructor, AdaptEvents) requires io.Outpu
 						listEnd = lw.prev
 					lw.next = null
 					lw.prev = null
-					length --	
+					length--
 					break
 				}
 				lw = lw.next
 			}
+
+			// ListItem current = list
+			// char result[] = new char[]("[")	
+			// while (current != null) {
+			// 	Int a = current.item
+			// 	result = new char[](result, " ", iu.intToString(a.i))
+			// 	current = current.next
+			// }
+
+			// result = new char[](result, " ]")
+			// out.println("$(result)")
 		}
 	}
 	
@@ -166,7 +182,7 @@ component provides data.adt.List:heap(Destructor, AdaptEvents) requires io.Outpu
 		buildFromArray(items)
 		return true
 	}
-	
+
 	void clearList() {
 		ListItem lw = list
 		list = null
@@ -180,6 +196,19 @@ component provides data.adt.List:heap(Destructor, AdaptEvents) requires io.Outpu
 			td.prev = null
 		}
 		length = 0
+	}
+
+	bool hasElement(Data item) {
+		mutex(listLock) {
+			ListItem lw = list
+			while (lw != null) {
+				if (lw.item === item) {
+					return true
+				}
+				lw = lw.next
+			}
+			return false
+		}
 	}
 	
 	void Destructor:destroy() {

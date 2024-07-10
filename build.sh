@@ -1,24 +1,32 @@
 #!/bin/bash
+set -e
 
 echo ":::Compiling Server:::"
-cd server
+pushd server
 dnc . -v
-echo ":::Compiling Distributor:::"
-cd ../distributor
-dnc . -sp ../server -v
+popd
 echo ":::Compiling list constant:::"
-cd ../constant/data/adt
+pushd constant/data/adt
 dnc . -v
+popd
+echo ":::Compiling Distributor:::"
+pushd distributor
+dnc . -sp ../server -v
+popd
 echo ":::Compiling list readn:::"
-cd ../../../readn/data/adt
+pushd readn/data/adt
 dnc . -v
+popd
 echo ":::Compiling list readn-writen:::"
-cd ../../../readn-writen/data/adt
+pushd readn-writen/data/adt
 dnc . -v
+popd
 echo ":::Compiling list writen:::"
-cd ../../../writen/data/adt
+pushd writen/data/adt
 dnc . -v
+popd
 echo ":::Compiling Client:::"
-cd ../../../client
+pushd client
 dnc . -v
+popd
 

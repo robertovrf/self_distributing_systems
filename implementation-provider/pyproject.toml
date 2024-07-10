@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "implementation-provider"
+version = "0.1.0"
+description = ""
+authors = []
+readme = "README.md"
+
+[tool.black]
+line-length = 120
+
+[tool.poetry.dependencies]
+python = "^3.12"
+kubernetes = "^29.0.0"
+fastapi = "^0.111.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: implementation-provider
+  labels:
+    app: implementation-provider
+spec:
+  ports:
+  - port : 8000
+    name: api
+    targetPort: 8000
+  selector:
+    app: implementation-provider
+  type: LoadBalancer
