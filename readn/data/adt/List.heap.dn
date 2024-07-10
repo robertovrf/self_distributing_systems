@@ -44,10 +44,10 @@ component provides data.adt.List:heap(Destructor, AdaptEvents) requires io.Outpu
 						heap[j] = heap[j+1]
 						j++
 					}
+					length--
 					break
 				}
 			}
-			length--
 		}
 	}
 

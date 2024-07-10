@@ -189,7 +189,7 @@ component provides App requires io.Output out, data.StringUtil strUtil, data.Int
 				new String("ListCPPropagate.o"),
 				new String("ListCPAlternate.o"),
 				new String("ListCPSharding.o"),
-				new String("ListCPDynamicSharding.o"),
+				new String("ListCPDynamicSharding.o")
 			)
 		}
 	}
