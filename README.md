@@ -1,4 +1,4 @@
-# Projeto Final de Graduação
+# Sistemas Auto-distribuídos
 
 ## Para compilar o projeto:
 
